@@ -1,0 +1,115 @@
+physical_properties:
+
+  - name: main_body
+    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+      x: 0.1 # m
+      y: 0.1 # m
+      z: 0.1 # m
+    faces:
+      face_dimensions: # m
+        x+: [0.1, 0.1] 
+        x-: [0.1, 0.1] 
+        y+: [0.1, 0.1] 
+        y-: [0.1, 0.1] 
+        z+: [0.1, 0.1] 
+        z-: [0.1, 0.1] 
+      face_normals: # unit normal
+        x+: [1.0, 0.0, 0.0]  
+        x-: [-1.0, 0.0, 0.0]
+        y+: [0.0, 1.0, 0.0]
+        y-: [0.0, -1.0, 0.0]
+        z+: [0.0, 0.0, 1.0]
+        z-: [0.0, 0.0, -1.0]
+    geometric_center: # Dictionary convention: body-frame component center in meters relative to the spacecraft origin
+      x: 0.0 # m
+      y: 0.0 # m
+      z: 0.0 # m
+    mass: 1.15 # kg
+
+  - name: x+_deployable
+    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+      x: 0.1 # m
+      y: 0.082 # m
+      z: 0.00385 # m
+    faces:
+      face_dimensions: # m
+        z+: [0.1, 0.082]
+        z-: [0.1, 0.082]
+      face_normals: 
+        z+: [1.0, 0.0, 0.0]
+        z-: [-1.0, 0.0, 0.0]
+    geometric_center:
+      x: 0.1 # m
+      y: 0.0 # m
+      z: 0.498075 # m
+    normal_vector: # Unit body-frame normal for the panel
+      x: 1.0
+      y: 0.0
+      z: 0.0
+    mass: 0.03507 # kg
+
+  - name: x-_deployable
+    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+      x: 0.1 # m
+      y: 0.082 # m
+      z: 0.00385 # m
+    faces:
+      face_dimensions: # m
+        z+: [0.1, 0.082]
+        z-: [0.1, 0.082]
+      face_normals: # unit normal
+        z+: [1.0, 0.0, 0.0]
+        z-: [-1.0, 0.0, 0.0]
+    geometric_center:
+      x: -0.1 # m
+      y: 0.0 # m
+      z: 0.498075 # m
+    normal_vector: # Unit body-frame normal for the panel
+      x: -1.0
+      y: 0.0
+      z: 0.0
+    mass: 0.03507 # kg
+
+  - name: y+_deployable
+    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+      x: 0.082 # m
+      y: 0.1 # m
+      z: 0.00385 # m
+    faces:
+      face_dimensions: # m
+        z+: [0.082, 0.1]
+        z-: [0.082, 0.1]
+      face_normals: # unit normal
+        z+: [0.0, 1.0, 0.0]
+        z-: [0.0, -1.0, 0.0]
+    geometric_center:
+      x: 0.0 # m
+      y: 0.1 # m
+      z: 0.498075 # m
+    normal_vector: # Unit body-frame normal for the panel
+      x: 0.0
+      y: 1.0
+      z: 0.0
+    mass: 0.03507 # kg
+
+  - name: y-_deployable
+    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+      x: 0.082 # m
+      y: 0.1 # m
+      z: 0.00385 # m
+    faces:
+      face_dimensions: # m
+        z+: [0.082, 0.1]
+        z-: [0.082, 0.1]
+      face_normals: # unit normal
+        z+: [0.0, 1.0, 0.0]
+        z-: [0.0, -1.0, 0.0]
+    geometric_center:
+      x: 0.0 # m
+      y: -0.1 # m
+      z: 0.498075 # m
+    normal_vector: # Unit body-frame normal for the panel
+      x: 0.0
+      y: -1.0
+      z: 0.0
+    mass: 0.03507 # kg
