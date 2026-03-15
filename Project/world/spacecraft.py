@@ -1,0 +1,276 @@
+"""
+Author: Chase Dunaway
+
+Spacecraft Object for the ARGUS Satellite
+
+The config.yaml file contains the physical properties of the satellite
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, Iterable
+
+import numpy as np
+import yaml
+
+from world.constants import MU_EARTH
+
+class Spacecraft:
+    """Spacecraft object for the ARGUS Satellite"""
+
+    BASE_STATE_SIZE = 14 # This will likely change later as more state variables are added
+
+    def __init__(self, config_path: str | Path = Path(__file__).with_name("config.yaml")) -> None:
+        """Initialize the spacecraft object from a YAML config file."""
+        self.config_path = Path(config_path)
+
+        self.names: list[str] = []
+        self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
+        self.position_vectors: np.ndarray = np.empty((0, 3), dtype=float)
+        self.face_dimensions: list[Dict[str, np.ndarray]] = []
+        self.face_normals: list[Dict[str, np.ndarray]] = []
+
+        # Configurable state, likely to be expanded later in HWs
+        self.state_size: int = self.BASE_STATE_SIZE
+        self.Idx: dict[str, dict[str, slice]] = {
+            "X": {
+                "POS_ECEF": slice(0, 3),
+                "VEL_ECEF": slice(3, 6),
+                "ATTITUDE": slice(6, 10),
+                "ATTITUDE_RATE": slice(10, 14),
+            }
+        }
+        self.state: np.ndarray = np.zeros(self.state_size, dtype=float)
+
+        # Placeholder defaults; load_config sets these from YAML initial_conditions.
+        self.position_ecef: np.ndarray = np.zeros(3, dtype=float)
+        self.velocity_ecef: np.ndarray = np.zeros(3, dtype=float)
+        self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        self.attitude_rate: np.ndarray = np.zeros(4, dtype=float)
+
+        self.load_config()
+
+    def set_state(self, state: np.ndarray) -> None:
+        """Set the full spacecraft state vector."""
+        if state.ndim != 1 or state.size != self.state_size:
+            raise ValueError(f"state must be a 1D vector with {self.state_size} elements")
+
+        self.state = state.astype(float)
+        self.position_ecef = self.state[self.Idx["X"]["POS_ECEF"]]
+        self.velocity_ecef = self.state[self.Idx["X"]["VEL_ECEF"]]
+        self.attitude = self.state[self.Idx["X"]["ATTITUDE"]]
+        self.attitude_rate = self.state[self.Idx["X"]["ATTITUDE_RATE"]]
+
+    def get_state(self) -> np.ndarray:
+        """Return full state vector sized by the model configuration."""
+        self.state[self.Idx["X"]["POS_ECEF"]] = self.position_ecef
+        self.state[self.Idx["X"]["VEL_ECEF"]] = self.velocity_ecef
+        self.state[self.Idx["X"]["ATTITUDE"]] = self.attitude
+        self.state[self.Idx["X"]["ATTITUDE_RATE"]] = self.attitude_rate
+        return self.state
+
+    @staticmethod
+    def _property_value(items: Iterable[Dict], target_name: str, default: float | int) -> float | int:
+        """Extract a named scalar value from a list of {name, value} property dictionaries."""
+        for item in items:
+            if str(item.get("name", "")).strip() == target_name:
+                return item.get("value", default)
+        return default
+
+    @staticmethod
+    def _state_from_orbital_elements(
+        semi_major_axis_m: float,
+        eccentricity: float,
+        inclination_deg: float,
+        raan_deg: float,
+        argument_of_perigee_deg: float,
+        true_anomaly_deg: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Convert classical orbital elements to Cartesian position and velocity."""
+        a = float(semi_major_axis_m)
+        e = float(eccentricity)
+        inc = np.deg2rad(float(inclination_deg))
+        raan = np.deg2rad(float(raan_deg))
+        argp = np.deg2rad(float(argument_of_perigee_deg))
+        nu = np.deg2rad(float(true_anomaly_deg))
+
+        if a <= 0.0:
+            raise ValueError("semi-major_axis must be positive")
+        if e < 0.0 or e >= 1.0:
+            raise ValueError("eccentricity must satisfy 0 <= e < 1 for this model")
+
+        p = a * (1.0 - e * e)
+        cos_nu = np.cos(nu)
+        sin_nu = np.sin(nu)
+        r_norm = p / (1.0 + e * cos_nu)
+
+        r_pqw = np.array([r_norm * cos_nu, r_norm * sin_nu, 0.0], dtype=float)
+        v_pqw = np.sqrt(MU_EARTH / p) * np.array([-sin_nu, e + cos_nu, 0.0], dtype=float)
+
+        c_raan, s_raan = np.cos(raan), np.sin(raan)
+        c_inc, s_inc = np.cos(inc), np.sin(inc)
+        c_argp, s_argp = np.cos(argp), np.sin(argp)
+
+        rotation = np.array(
+            [
+                [c_raan * c_argp - s_raan * s_argp * c_inc, -c_raan * s_argp - s_raan * c_argp * c_inc, s_raan * s_inc],
+                [s_raan * c_argp + c_raan * s_argp * c_inc, -s_raan * s_argp + c_raan * c_argp * c_inc, -c_raan * s_inc],
+                [s_argp * s_inc, c_argp * s_inc, c_inc],
+            ],
+            dtype=float,
+        )
+
+        position = rotation @ r_pqw
+        velocity = rotation @ v_pqw
+        return position, velocity
+
+    @staticmethod
+    def _geometric_center_vector(geometric_center: Dict | None) -> np.ndarray:
+        """Build a 3D vector from geometric center values (x, y, z)."""
+        geometric_center = geometric_center or {}
+        return np.array(
+            [
+                float(geometric_center.get("x", 0.0)),
+                float(geometric_center.get("y", 0.0)),
+                float(geometric_center.get("z", 0.0)),
+            ],
+            dtype=float,
+        )
+
+    @staticmethod
+    def _face_vectors(face_config: Dict | None) -> Dict[str, Dict[str, np.ndarray]]:
+        """Build nested face-dimension and face-normal vectors from YAML face values."""
+        face_config = face_config or {}
+        face_dimensions = face_config.get("face_dimensions", {}) or {}
+        face_normals = face_config.get("face_normals", {}) or {}
+
+        return {
+            "face_dimensions": {
+                str(face_name): np.asarray(face_vector, dtype=float)
+                for face_name, face_vector in face_dimensions.items()
+            },
+            "face_normals": {
+                str(face_name): np.asarray(face_vector, dtype=float)
+                for face_name, face_vector in face_normals.items()
+            },
+        }
+    
+    @staticmethod
+    def _qdot(attitude: np.ndarray, attitude_rate: np.ndarray) -> np.ndarray:
+        """Compute quaternion derivative from attitude and attitude rate."""
+        q = attitude
+        q_dot = attitude_rate
+
+        # Quaternion kinematics: q_dot = 0.5 * Omega(q) * q_dot
+        Omega = np.array([
+            [0, -q_dot[0], -q_dot[1], -q_dot[2]],
+            [q_dot[0], 0, q_dot[2], -q_dot[1]],
+            [q_dot[1], -q_dot[2], 0, q_dot[0]],
+            [q_dot[2], q_dot[1], -q_dot[0], 0]
+        ], dtype=float)
+
+        return 0.5 * Omega @ q
+
+    def load_config(self) -> None:
+        """Load physical properties from the spacecraft YAML config file."""
+        with self.config_path.open("r", encoding="utf-8") as file:
+            cfg = yaml.safe_load(file) or {}
+
+        dynamics_properties: Iterable[Dict] = cfg.get("dynamics_properties", [])
+        raw_state_size = self._property_value(dynamics_properties, "state_size", self.BASE_STATE_SIZE)
+        self.state_size = int(raw_state_size)
+        if self.state_size < self.BASE_STATE_SIZE:
+            raise ValueError(
+                f"state_size must be >= {self.BASE_STATE_SIZE} to hold [r, v, q, q_dot]"
+            )
+
+        self.Idx = {
+            "X": {
+                "POS_ECEF": slice(0, 3),
+                "VEL_ECEF": slice(3, 6),
+                "ATTITUDE": slice(6, 10),
+                "ATTITUDE_RATE": slice(10, 14),
+            }
+        }
+        self.state = np.zeros(self.state_size, dtype=float)
+
+        physical_properties: Iterable[Dict] = cfg.get("physical_properties", [])
+        initial_conditions: Iterable[Dict] = cfg.get("initial_conditions", [])
+
+        position_init, velocity_init = self._state_from_orbital_elements(
+            semi_major_axis_m=float(self._property_value(initial_conditions, "semi-major_axis", 6_968_000.0)),
+            eccentricity=float(self._property_value(initial_conditions, "eccentricity", 0.0)),
+            inclination_deg=float(self._property_value(initial_conditions, "inclination", 0.0)),
+            raan_deg=float(self._property_value(initial_conditions, "raan", 0.0)),
+            argument_of_perigee_deg=float(self._property_value(initial_conditions, "argument_of_perigee", 0.0)),
+            true_anomaly_deg=float(self._property_value(initial_conditions, "true_anomaly", 0.0)),
+        )
+
+        attitude_init = np.asarray(
+            self._property_value(initial_conditions, "attitude", [1.0, 0.0, 0.0, 0.0]),
+            dtype=float,
+        )
+        attitude_rate_init = np.asarray(
+            self._property_value(initial_conditions, "attitude_rate", [0.0, 0.0, 0.0, 0.0]),
+            dtype=float,
+        )
+
+        # If rate is provided as angular velocity, convert to qdot 
+        if attitude_rate_init.ndim == 1 and attitude_rate_init.size == 3:
+            attitude_rate_init = self._qdot(attitude_init, attitude_rate_init)
+
+        initial_state = np.zeros(self.state_size, dtype=float)
+        initial_state[self.Idx["X"]["POS_ECEF"]] = position_init
+        initial_state[self.Idx["X"]["VEL_ECEF"]] = velocity_init
+        initial_state[self.Idx["X"]["ATTITUDE"]] = attitude_init
+        initial_state[self.Idx["X"]["ATTITUDE_RATE"]] = attitude_rate_init
+        self.set_state(initial_state)
+
+        names: list[str] = []
+        masses: list[float] = []
+        face_dimensions: list[Dict[str, np.ndarray]] = []
+        face_normals: list[Dict[str, np.ndarray]] = []
+        geometric_centers: list[np.ndarray] = []
+
+        for item in physical_properties:
+            name = str(item.get("name", "unknown_component"))
+            mass = float(item.get("mass", 0.0))
+            geometric_center = self._geometric_center_vector(item.get("geometric_center"))
+            component_faces = self._face_vectors(item.get("faces"))
+
+            names.append(name)
+            masses.append(mass)
+            face_dimensions.append(component_faces["face_dimensions"])
+            face_normals.append(component_faces["face_normals"])
+            geometric_centers.append(geometric_center)
+
+        self.names = names
+        self.mass_vector = np.asarray(masses, dtype=float)
+        self.position_vectors = (
+            np.vstack(geometric_centers) if geometric_centers else np.empty((0, 3), dtype=float)
+        )
+        self.face_dimensions = face_dimensions
+        self.face_normals = face_normals
+
+    def compute_center_of_mass(self) -> np.ndarray:
+        """Compute the spacecraft center of mass from loaded component data."""
+        if self.mass_vector.size == 0:
+            raise ValueError("No component masses loaded from config")
+
+        total_mass = float(np.sum(self.mass_vector))
+        if total_mass == 0.0:
+            raise ValueError("Total mass is zero")
+
+        return np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0) / total_mass
+
+    def compute_inertia_tensor(self) -> np.ndarray:
+        """Compute inertia tensor from loaded component masses and positions."""
+        inertia_tensor = np.zeros((3, 3), dtype=float)
+
+        for mass, position in zip(self.mass_vector, self.position_vectors):
+            r_squared = float(np.dot(position, position))
+            inertia_tensor += mass * (r_squared * np.eye(3) - np.outer(position, position))
+
+        return inertia_tensor
+        

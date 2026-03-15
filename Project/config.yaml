@@ -1,3 +1,49 @@
+simulation_properties:
+
+  - name: time_step
+    value: 1.0 # seconds
+
+  - name: max_simulation_time
+    value: 12000.0 # seconds
+
+  - name: log_interval_steps
+    value: 10.0 # seconds
+
+initial_conditions:
+
+    # I will later add the option to specify orbital parameters instead of state directly  
+
+  - name: semi-major_axis
+    value: 6968000.0 # m
+    deviation: 10000 # m 
+
+  - name: eccentricity
+    value: 0.000
+    deviation: 0.000
+
+  - name: inclination
+    value: 98.0 # degrees
+    deviation: 0.5 # degrees
+
+  - name: raan
+    value: 171 # degrees
+    deviation: 20 # degrees
+
+  - name: argument_of_perigee
+    value: 63 # degrees
+    deviation: 10 # degrees
+
+  - name: true_anomaly
+    value: 0.0 # degrees
+    deviaation: 10 # degrees
+
+  - name : attitude
+    value: [1.0, 0.0, 0.0, 0.0] # quaternion (w x y z)
+
+  - name: attitude_rate
+    value: [-2.154434690031884, 2.154434690031884, -2.154434690031884] # rad/s (10 rpm)
+
+
 physical_properties:
 
   - name: main_body
@@ -113,3 +159,16 @@ physical_properties:
       y: -1.0
       z: 0.0
     mass: 0.03507 # kg
+
+
+dynamics_properties:
+
+ - name: state_size
+   value: 14 # position, velocity, quaternion, quaternion derivative
+
+
+integration_properties:
+ 
+  # For future use in the potential of using a different integration scheme
+ - name: integration_method
+   value: rk4
