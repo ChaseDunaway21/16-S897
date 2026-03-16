@@ -1,14 +1,17 @@
 simulation_properties:
 
   - name: monte_carlo
-    value: true
-    trials: 100
+    value: False
+    trials: 20
+
+  - name: ideal # this only applies to non-monte carlo simulations, monte carlo will include deviations and perturbations
+    value: False
 
   - name: time_step
-    value: 0.05 # seconds
+    value: 0.5 # seconds
 
   - name: max_simulation_time
-    value: 100.0 # seconds
+    value: 1000.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -27,34 +30,34 @@ initial_conditions:
 
   - name: inclination
     value: 98.0 # degrees
-    deviation: 0.5 # degrees
+    deviation: 0.0 # degrees
 
   - name: raan
     value: 171 # degrees
-    deviation: 20 # degrees
+    deviation: 00 # degrees
 
   - name: argument_of_perigee
     value: 63 # degrees
-    deviation: 10 # degrees
+    deviation: 00 # degrees
 
   - name: true_anomaly
     value: 0.0 # degrees
-    deviaation: 10 # degrees
+    deviation: 00 # degrees
 
   - name : attitude
     value: [1.0, 0.0, 0.0, 0.0] # quaternion (w x y z)
 
   - name: attitude_rate
-    value: [0, 1.047183, 0] # rad/s (10 rpm)
-    nominal_value: [0, 0, 0] # rad/s
-    deviation: [1, 1, 1] # rad/s
+    value: [1.0407409737537963, 1.0407409737537963, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
+    nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
+    deviation: [0.9, 0.9, 0.9] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
 
 physical_properties:
 
   - name: main_body
-    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+    dimensions:
       x: 0.1 # m
       y: 0.1 # m
       z: 0.1 # m
@@ -73,14 +76,15 @@ physical_properties:
         y-: [0.0, -1.0, 0.0]
         z+: [0.0, 0.0, 1.0]
         z-: [0.0, 0.0, -1.0]
-    geometric_center: # Dictionary convention: body-frame component center in meters relative to the spacecraft origin
+    geometric_center: 
       x: 0.0 # m
       y: 0.0 # m
       z: 0.0 # m
     mass: 1.15 # kg
+    mass_deviation: 0.05 # kg
 
   - name: x+_deployable
-    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+    dimensions:
       x: 0.1 # m
       y: 0.082 # m
       z: 0.00385 # m
@@ -95,14 +99,15 @@ physical_properties:
       x: 0.1 # m
       y: 0.0 # m
       z: 0.498075 # m
-    normal_vector: # Unit body-frame normal for the panel
+    normal_vector: 
       x: 1.0
       y: 0.0
       z: 0.0
     mass: 0.03507 # kg
+    mass_deviation: 0.01 # kg
 
   - name: x-_deployable
-    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+    dimensions: 
       x: 0.1 # m
       y: 0.082 # m
       z: 0.00385 # m
@@ -117,14 +122,15 @@ physical_properties:
       x: -0.1 # m
       y: 0.0 # m
       z: 0.498075 # m
-    normal_vector: # Unit body-frame normal for the panel
+    normal_vector: 
       x: -1.0
       y: 0.0
       z: 0.0
     mass: 0.03507 # kg
+    mass_deviation: 0.01 # kg
 
   - name: y+_deployable
-    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+    dimensions: 
       x: 0.082 # m
       y: 0.1 # m
       z: 0.00385 # m
@@ -139,14 +145,15 @@ physical_properties:
       x: 0.0 # m
       y: 0.1 # m
       z: 0.498075 # m
-    normal_vector: # Unit body-frame normal for the panel
+    normal_vector: 
       x: 0.0
       y: 1.0
       z: 0.0
     mass: 0.03507 # kg
+    mass_deviation: 0.01 # kg
 
   - name: y-_deployable
-    dimensions: # Dictionary convention: body-frame extents in meters along x, y, z
+    dimensions: 
       x: 0.082 # m
       y: 0.1 # m
       z: 0.00385 # m
@@ -161,11 +168,12 @@ physical_properties:
       x: 0.0 # m
       y: -0.1 # m
       z: 0.498075 # m
-    normal_vector: # Unit body-frame normal for the panel
+    normal_vector: 
       x: 0.0
       y: -1.0
       z: 0.0
     mass: 0.03507 # kg
+    mass_deviation: 0.01 # kg
 
 
 dynamics_properties:

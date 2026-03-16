@@ -47,9 +47,11 @@ def attitude_dynamics(
     q = state[attitude_slice]
     w = state[attitude_rate_slice]
 
-    # Scalar-first quaternion kinematics with body-rate omega: qdot = 0.5 * G(q) * omega.
+    # Scalar-first quaternion kinematics
     q_scalar = q[0]
     q_vector = q[1:4]
+
+    # This is the same as the in-class lecture notes, but made to run efficiently with numpy
     qdot_scalar = -0.5 * float(np.dot(q_vector, w))
     qdot_vector = 0.5 * (q_scalar * w + np.cross(q_vector, w))
     qdot = np.hstack((qdot_scalar, qdot_vector))
