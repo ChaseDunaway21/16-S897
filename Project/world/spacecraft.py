@@ -14,12 +14,12 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 
-from world.constants import MU_EARTH
+from world.models.constants import MU_EARTH
 
 class Spacecraft:
     """Spacecraft object for the ARGUS Satellite"""
 
-    BASE_STATE_SIZE = 14 # This will likely change later as more state variables are added
+    BASE_STATE_SIZE = 13 # [position(3), velocity(3), quaternion(4), omega(3)]
 
     def __init__(self, config_path: str | Path = Path(__file__).with_name("config.yaml")) -> None:
         """Initialize the spacecraft object from a YAML config file."""
@@ -27,6 +27,7 @@ class Spacecraft:
 
         self.names: list[str] = []
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
+        self.inertia_tensor: np.ndarray = np.zeros((3, 3), dtype=float)
         self.position_vectors: np.ndarray = np.empty((0, 3), dtype=float)
         self.face_dimensions: list[Dict[str, np.ndarray]] = []
         self.face_normals: list[Dict[str, np.ndarray]] = []
@@ -38,7 +39,7 @@ class Spacecraft:
                 "POS_ECEF": slice(0, 3),
                 "VEL_ECEF": slice(3, 6),
                 "ATTITUDE": slice(6, 10),
-                "ATTITUDE_RATE": slice(10, 14),
+                "ATTITUDE_RATE": slice(10, 13),
             }
         }
         self.state: np.ndarray = np.zeros(self.state_size, dtype=float)
@@ -47,7 +48,7 @@ class Spacecraft:
         self.position_ecef: np.ndarray = np.zeros(3, dtype=float)
         self.velocity_ecef: np.ndarray = np.zeros(3, dtype=float)
         self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
-        self.attitude_rate: np.ndarray = np.zeros(4, dtype=float)
+        self.attitude_rate: np.ndarray = np.zeros(3, dtype=float)
 
         self.load_config()
 
@@ -156,22 +157,6 @@ class Spacecraft:
             },
         }
     
-    @staticmethod
-    def _qdot(attitude: np.ndarray, attitude_rate: np.ndarray) -> np.ndarray:
-        """Compute quaternion derivative from attitude and attitude rate."""
-        q = attitude
-        q_dot = attitude_rate
-
-        # Quaternion kinematics: q_dot = 0.5 * Omega(q) * q_dot
-        Omega = np.array([
-            [0, -q_dot[0], -q_dot[1], -q_dot[2]],
-            [q_dot[0], 0, q_dot[2], -q_dot[1]],
-            [q_dot[1], -q_dot[2], 0, q_dot[0]],
-            [q_dot[2], q_dot[1], -q_dot[0], 0]
-        ], dtype=float)
-
-        return 0.5 * Omega @ q
-
     def load_config(self) -> None:
         """Load physical properties from the spacecraft YAML config file."""
         with self.config_path.open("r", encoding="utf-8") as file:
@@ -181,16 +166,14 @@ class Spacecraft:
         raw_state_size = self._property_value(dynamics_properties, "state_size", self.BASE_STATE_SIZE)
         self.state_size = int(raw_state_size)
         if self.state_size < self.BASE_STATE_SIZE:
-            raise ValueError(
-                f"state_size must be >= {self.BASE_STATE_SIZE} to hold [r, v, q, q_dot]"
-            )
+            raise ValueError(f"state_size must be >= {self.BASE_STATE_SIZE} to hold [r, v, q, omega]")
 
         self.Idx = {
             "X": {
                 "POS_ECEF": slice(0, 3),
                 "VEL_ECEF": slice(3, 6),
                 "ATTITUDE": slice(6, 10),
-                "ATTITUDE_RATE": slice(10, 14),
+                "ATTITUDE_RATE": slice(10, 13),
             }
         }
         self.state = np.zeros(self.state_size, dtype=float)
@@ -212,13 +195,11 @@ class Spacecraft:
             dtype=float,
         )
         attitude_rate_init = np.asarray(
-            self._property_value(initial_conditions, "attitude_rate", [0.0, 0.0, 0.0, 0.0]),
+            self._property_value(initial_conditions, "attitude_rate", [0.0, 0.0, 0.0]),
             dtype=float,
         )
-
-        # If rate is provided as angular velocity, convert to qdot 
-        if attitude_rate_init.ndim == 1 and attitude_rate_init.size == 3:
-            attitude_rate_init = self._qdot(attitude_init, attitude_rate_init)
+        if attitude_rate_init.ndim != 1 or attitude_rate_init.size != 3:
+            raise ValueError("initial_conditions.attitude_rate must be a 3-element angular velocity vector [wx, wy, wz]")
 
         initial_state = np.zeros(self.state_size, dtype=float)
         initial_state[self.Idx["X"]["POS_ECEF"]] = position_init
@@ -266,11 +247,13 @@ class Spacecraft:
 
     def compute_inertia_tensor(self) -> np.ndarray:
         """Compute inertia tensor from loaded component masses and positions."""
+
         inertia_tensor = np.zeros((3, 3), dtype=float)
 
         for mass, position in zip(self.mass_vector, self.position_vectors):
             r_squared = float(np.dot(position, position))
             inertia_tensor += mass * (r_squared * np.eye(3) - np.outer(position, position))
 
-        return inertia_tensor
-        
+        self.inertia_tensor = inertia_tensor
+
+        return self.inertia_tensor

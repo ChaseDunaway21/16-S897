@@ -11,7 +11,7 @@ Inspiration comes from ARGUS-2's simulation framework
 from __future__ import annotations
 
 import numpy as np
-from world.constants import MU_EARTH, J2, RADIUS_EARTH
+from world.models.constants import MU_EARTH, J2, RADIUS_EARTH
     
 def acceleration(position: np.ndarray) -> np.ndarray:
     """Compute gravitational acceleration."""

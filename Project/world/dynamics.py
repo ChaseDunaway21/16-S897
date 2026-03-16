@@ -11,35 +11,64 @@ OUTPUT:
 from __future__ import annotations
 
 import numpy as np
+
+from world.math import skew_symmetric
 import world.models.gravity as gravity
 
-
-def f(state: np.ndarray, current_time: float, dt: float) -> np.ndarray:
-    """Compute the derivative of the state, different dynamic models can be added here later"""
-    return orbital_dynamics(state, current_time, dt)
-
-def orbital_dynamics(
+def f(
     state: np.ndarray,
+    state_index: dict,
     current_time: float,
     dt: float,
-    state_index: dict | None = None,
+    inertia_tensor: np.ndarray,
 ) -> np.ndarray:
-    """Compute orbital dynamics."""
+    """Compute full state derivative from orbital and attitude dynamics."""
     _ = current_time
     _ = dt
 
-    xdot = np.zeros_like(state)
-    if state_index is None:
-        xdot[:3] = state[3:6]
-        xdot[3:6] = gravity.acceleration(state[:3])
-        return xdot
+    state_dot = np.zeros_like(state)
+
+    orbital_dynamics(state, state_dot, state_index)
+    attitude_dynamics(state, state_dot, state_index, inertia_tensor)
+
+    return state_dot
+    
+def attitude_dynamics(
+    state: np.ndarray,
+    state_dot: np.ndarray,
+    state_index: dict,
+    inertia_tensor: np.ndarray,
+) -> np.ndarray:
+    """Compute quaternion and angular-velocity dynamics."""
+
+    attitude_slice = state_index["ATTITUDE"]
+    attitude_rate_slice = state_index["ATTITUDE_RATE"]
+
+    q = state[attitude_slice]
+    w = state[attitude_rate_slice]
+
+    # Scalar-first quaternion kinematics with body-rate omega: qdot = 0.5 * G(q) * omega.
+    q_scalar = q[0]
+    q_vector = q[1:4]
+    qdot_scalar = -0.5 * float(np.dot(q_vector, w))
+    qdot_vector = 0.5 * (q_scalar * w + np.cross(q_vector, w))
+    qdot = np.hstack((qdot_scalar, qdot_vector))
+    wdot = np.linalg.solve(inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w))
+
+    state_dot[attitude_slice] = qdot
+    state_dot[attitude_rate_slice] = wdot
+    return state_dot
+
+def orbital_dynamics(state: np.ndarray, state_dot: np.ndarray, state_index: dict) -> np.ndarray:
+    """Compute translational orbital dynamics in the full state vector."""
 
     pos_slice = state_index["POS_ECEF"]
     vel_slice = state_index["VEL_ECEF"]
 
-    xdot[pos_slice] = state[vel_slice]
-    xdot[vel_slice] = gravity.acceleration(state[pos_slice])
-    return xdot
+    state_dot[pos_slice] = state[vel_slice]
+    state_dot[vel_slice] = gravity.acceleration(state[pos_slice])
+
+    return state_dot
 
 def rk4_step(state: np.ndarray, current_time: float, dt: float, derivative_fn) -> np.ndarray:
     """Generic RK4 step for any state dimension and derivative function."""
@@ -51,23 +80,30 @@ def rk4_step(state: np.ndarray, current_time: float, dt: float, derivative_fn) -
     return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
 def integrate_dynamics(
-    state: np.ndarray,
+    spacecraft,
     current_time: float,
     dt: float,
     method: str = "rk4",
     derivative_fn=None,
-    state_index: dict | None = None,
 ) -> np.ndarray:
-    """Integrate the state using the defined method"""
+    """Integrate spacecraft dynamics while using state/index/inertia from the spacecraft object."""
+
+    state = spacecraft.get_state().astype(float, copy=True)
+    state_index = spacecraft.Idx["X"]
+    inertia_tensor = spacecraft.compute_inertia_tensor()
 
     if derivative_fn is None:
-        if state_index is not None:
-            derivative_fn = lambda x, t, h: orbital_dynamics(x, t, h, state_index)
-        else:
-            derivative_fn = f
+        derivative_fn = lambda x, t, h: f(x, state_index, t, h, inertia_tensor)
 
     if method == "rk4":
+        attitude_slice = state_index["ATTITUDE"]
+
         x_new = rk4_step(state, current_time, dt, derivative_fn)
+        quat_norm = np.linalg.norm(x_new[attitude_slice])
+        if quat_norm > 0.0:
+            x_new[attitude_slice] /= quat_norm
+
+        spacecraft.set_state(x_new)
 
     else:
         raise ValueError(f"only RK4")

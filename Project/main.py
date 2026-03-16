@@ -15,8 +15,8 @@ def main() -> None:
 	config_path = Path(__file__).with_name("config.yaml")
 	sim = Simulator(config_path=config_path)
 	result = sim.run()
-	sim.plot_simulation(result)
-    
+	sim.plot_simulation(result, show=False)
+	sim.plot_momentum_sphere(result, show=False)
 
 	print("Simulation complete")
 	print(f"Orbit period: {result['orbit_period_s']:.2f} s")
@@ -27,7 +27,7 @@ def main() -> None:
 	print(f"  position [m]: {sim.spacecraft.position_ecef}")
 	print(f"  velocity [m/s]: {sim.spacecraft.velocity_ecef}")
 	print(f"  attitude [-]: {sim.spacecraft.attitude}")
-	print(f"  attitude_rate [-]: {sim.spacecraft.attitude_rate}")
+	print(f"  omega [rad/s]: {sim.spacecraft.attitude_rate}")
 
 
 if __name__ == "__main__":

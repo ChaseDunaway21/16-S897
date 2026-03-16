@@ -1,13 +1,17 @@
 simulation_properties:
 
+  - name: monte_carlo
+    value: true
+    trials: 100
+
   - name: time_step
-    value: 1.0 # seconds
+    value: 0.05 # seconds
 
   - name: max_simulation_time
-    value: 12000.0 # seconds
+    value: 100.0 # seconds
 
   - name: log_interval_steps
-    value: 10.0 # seconds
+    value: 10.0
 
 initial_conditions:
 
@@ -41,7 +45,10 @@ initial_conditions:
     value: [1.0, 0.0, 0.0, 0.0] # quaternion (w x y z)
 
   - name: attitude_rate
-    value: [-2.154434690031884, 2.154434690031884, -2.154434690031884] # rad/s (10 rpm)
+    value: [0, 1.047183, 0] # rad/s (10 rpm)
+    nominal_value: [0, 0, 0] # rad/s
+    deviation: [1, 1, 1] # rad/s
+    perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
 
 physical_properties:
@@ -163,12 +170,12 @@ physical_properties:
 
 dynamics_properties:
 
- - name: state_size
-   value: 14 # position, velocity, quaternion, quaternion derivative
+  - name: state_size
+    value: 13 # position, velocity, quaternion, angular velocity
 
 
 integration_properties:
- 
+
   # For future use in the potential of using a different integration scheme
- - name: integration_method
-   value: rk4
+  - name: integration_method
+    value: rk4

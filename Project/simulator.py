@@ -9,11 +9,11 @@ from typing import Dict, Iterable
 
 import numpy as np
 import yaml
+import matplotlib.pyplot as plt
 
-from world.constants import MU_EARTH
+from world.models.constants import MU_EARTH
 from world.dynamics import integrate_dynamics
 from world.spacecraft import Spacecraft
-
 
 class Simulator:
     """Run Simulation of Satellite"""
@@ -102,7 +102,7 @@ class Simulator:
         self.logger.info("  position [m]: %s", self._vector_to_string(state[self.idx["POS_ECEF"]]))
         self.logger.info("  velocity [m/s]: %s", self._vector_to_string(state[self.idx["VEL_ECEF"]]))
         self.logger.info("  attitude [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE"]]))
-        self.logger.info("  attitude_rate [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]))
+        self.logger.info("  omega [rad/s]: %s", self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]))
 
     def run(self) -> dict[str, np.ndarray | float | int]:
         state = self.spacecraft.get_state().astype(float, copy=True)
@@ -126,11 +126,10 @@ class Simulator:
         t = 0.0
         for k in range(1, num_steps + 1):
             state = integrate_dynamics(
-                state,
+                self.spacecraft,
                 t,
                 self.dt,
                 method=self.integration_method,
-                state_index=self.idx,
             )
             t += self.dt
             times[k] = t
@@ -141,7 +140,6 @@ class Simulator:
 
         final_state = history[-1]
 
-        # Update spacecraft state attributes from final state in SI units.
         final_pos_m = final_state[self.idx["POS_ECEF"]]
         final_vel_ms = final_state[self.idx["VEL_ECEF"]]
         updated_state = self.spacecraft.get_state()
@@ -164,10 +162,6 @@ class Simulator:
 
     def plot_simulation(self, result: dict[str, np.ndarray | float | int], show: bool = True, save_path: str | Path | None = None) -> None:
         """Plot trajectory and state histories from a simulation result."""
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError as exc:
-            raise ImportError("matplotlib is required for plotting. Install it with 'pip install matplotlib'.") from exc
 
         times = np.asarray(result["times_s"], dtype=float)
         history = np.asarray(result["state_history_si"], dtype=float)
@@ -177,18 +171,40 @@ class Simulator:
         att = history[:, self.idx["ATTITUDE"]]
         att_rate = history[:, self.idx["ATTITUDE_RATE"]]
 
-        fig = plt.figure(figsize=(14, 10))
+        fig = plt.figure(figsize=(15, 10), facecolor="#f7f8fa")
+        fig.suptitle("ARGUS Simulation Overview", fontsize=16, fontweight="bold", y=0.98)
 
         ax_orbit = fig.add_subplot(2, 2, 1, projection="3d")
-        ax_orbit.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=1.2, color="tab:blue")
-        ax_orbit.scatter(pos_km[0, 0], pos_km[0, 1], pos_km[0, 2], color="tab:green", s=30, label="start")
-        ax_orbit.scatter(pos_km[-1, 0], pos_km[-1, 1], pos_km[-1, 2], color="tab:red", s=30, label="end")
+        ax_orbit.set_facecolor("#f2f4f8")
+        ax_orbit.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#0f766e", alpha=0.95)
+        ax_orbit.scatter(
+            pos_km[0, 0],
+            pos_km[0, 1],
+            pos_km[0, 2],
+            color="#19a04b",
+            edgecolors="white",
+            linewidths=0.8,
+            s=45,
+            label="start",
+            zorder=3,
+        )
+        ax_orbit.scatter(
+            pos_km[-1, 0],
+            pos_km[-1, 1],
+            pos_km[-1, 2],
+            color="#e12121",
+            edgecolors="white",
+            linewidths=0.8,
+            s=45,
+            label="end",
+            zorder=3,
+        )
         ax_orbit.set_title("Trajectory (ECEF)")
         ax_orbit.set_xlabel("x [km]")
         ax_orbit.set_ylabel("y [km]")
         ax_orbit.set_zlabel("z [km]")
         ax_orbit.legend(loc="best")
-        # Keep 3D axes equally scaled so the orbit grid is not stretched.
+
         x_min, x_max = float(np.min(pos_km[:, 0])), float(np.max(pos_km[:, 0]))
         y_min, y_max = float(np.min(pos_km[:, 1])), float(np.max(pos_km[:, 1]))
         z_min, z_max = float(np.min(pos_km[:, 2])), float(np.max(pos_km[:, 2]))
@@ -204,39 +220,44 @@ class Simulator:
         ax_orbit.set_box_aspect((1.0, 1.0, 1.0))
 
         ax_vel = fig.add_subplot(2, 2, 2)
-        ax_vel.plot(times, vel_kms[:, 0], label="vx")
-        ax_vel.plot(times, vel_kms[:, 1], label="vy")
-        ax_vel.plot(times, vel_kms[:, 2], label="vz")
+        ax_vel.set_facecolor("#f2f4f8")
+        ax_vel.plot(times, vel_kms[:, 0], label="vx", linewidth=2.0, color="#2563eb")
+        ax_vel.plot(times, vel_kms[:, 1], label="vy", linewidth=2.0, color="#f59e0b")
+        ax_vel.plot(times, vel_kms[:, 2], label="vz", linewidth=2.0, color="#14b8a6")
         ax_vel.set_title("Velocity Components")
         ax_vel.set_xlabel("time [s]")
         ax_vel.set_ylabel("velocity [km/s]")
         ax_vel.legend(loc="best")
-        ax_vel.grid(True, alpha=0.3)
+        ax_vel.grid(True, alpha=0.35, linestyle="--", linewidth=0.7)
         ax_vel.set_box_aspect(1)
 
         ax_att = fig.add_subplot(2, 2, 3)
-        ax_att.plot(times, att[:, 0], label="a1")
-        ax_att.plot(times, att[:, 1], label="a2")
-        ax_att.plot(times, att[:, 2], label="a3")
+        ax_att.set_facecolor("#f2f4f8")
+        ax_att.plot(times, att[:, 0], label="q0", linewidth=2.0, color="#6d28d9")
+        ax_att.plot(times, att[:, 1], label="q1", linewidth=2.0, color="#db2777")
+        ax_att.plot(times, att[:, 2], label="q2", linewidth=2.0, color="#0ea5e9")
+        if att.shape[1] > 3:
+            ax_att.plot(times, att[:, 3], label="q3", linewidth=2.0, color="#16a34a")
         ax_att.set_title("Attitude Components")
         ax_att.set_xlabel("time [s]")
         ax_att.set_ylabel("attitude [-]")
         ax_att.legend(loc="best")
-        ax_att.grid(True, alpha=0.3)
+        ax_att.grid(True, alpha=0.35, linestyle="--", linewidth=0.7)
         ax_att.set_box_aspect(1)
 
         ax_att_rate = fig.add_subplot(2, 2, 4)
-        ax_att_rate.plot(times, att_rate[:, 0], label="da1")
-        ax_att_rate.plot(times, att_rate[:, 1], label="da2")
-        ax_att_rate.plot(times, att_rate[:, 2], label="da3")
-        ax_att_rate.set_title("Attitude Rate Components")
+        ax_att_rate.set_facecolor("#f2f4f8")
+        ax_att_rate.plot(times, att_rate[:, 0], label="wx", linewidth=2.0, color="#2563eb")
+        ax_att_rate.plot(times, att_rate[:, 1], label="wy", linewidth=2.0, color="#f97316")
+        ax_att_rate.plot(times, att_rate[:, 2], label="wz", linewidth=2.0, color="#059669")
+        ax_att_rate.set_title("Angular Velocity Components")
         ax_att_rate.set_xlabel("time [s]")
-        ax_att_rate.set_ylabel("attitude rate [-]")
+        ax_att_rate.set_ylabel("omega [rad/s]")
         ax_att_rate.legend(loc="best")
-        ax_att_rate.grid(True, alpha=0.3)
+        ax_att_rate.grid(True, alpha=0.35, linestyle="--", linewidth=0.7)
         ax_att_rate.set_box_aspect(1)
 
-        fig.tight_layout()
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.965))
 
         if save_path is None:
             save_path = self.config_path.parent / "results" / "simulation_plot.png"
@@ -250,3 +271,77 @@ class Simulator:
             plt.show()
 
         return fig
+
+    def plot_momentum_sphere(self, result: dict[str, np.ndarray | float | int], show: bool = True, save_path: str | Path | None = None) -> None:
+        """Plot the spacecraft's angular momentum sphere"""
+
+        history = np.asarray(result["state_history_si"], dtype=float)
+        w = history[:, self.idx["ATTITUDE_RATE"]]
+        n = w.shape[0]
+        J = self.spacecraft.compute_inertia_tensor()
+
+        h_body = (J @ w.T).T
+        h_norm = np.linalg.norm(h_body, axis=1, keepdims=True)
+        h_norm[h_norm == 0.0] = 1.0
+        momentum_history = (h_body / h_norm).T
+        
+        u = np.linspace(-np.pi, np.pi, 100)
+        v = np.linspace(0, np.pi, 100)
+        U, V = np.meshgrid(u, v)
+
+        x = np.cos(U) * np.sin(V)
+        y = np.sin(U) * np.sin(V)
+        z = np.cos(V)
+
+        fig = plt.figure(figsize=(9, 8), facecolor="#f7f8fa")
+        ax = plt.subplot(1, 1, 1, projection="3d")
+        ax.set_facecolor("#f2f4f8")
+        ax.plot_surface(x, y, z, cmap="Blues", alpha=0.22, edgecolor="none", antialiased=True)
+        ax.plot(
+            momentum_history[0, :],
+            momentum_history[1, :],
+            momentum_history[2, :],
+            linewidth=2.0,
+            color="#0f172a",
+            alpha=0.9,
+        )
+        color_progress = np.linspace(0.0, 1.0, n)
+        ax.scatter(
+            momentum_history[0, :],
+            momentum_history[1, :],
+            momentum_history[2, :],
+            c=color_progress,
+            cmap="plasma",
+            s=6,
+            alpha=0.85,
+        )
+        ax.set_title("Angular Momentum Sphere")
+        ax.set_xlabel("Lx [kg*m^2/s]")
+        ax.set_ylabel("Ly [kg*m^2/s]")
+        ax.set_zlabel("Lz [kg*m^2/s]")
+        ax.set_box_aspect((1.0, 1.0, 1.0))
+        fig.tight_layout()
+
+        if save_path is None:
+            save_path = self.config_path.parent / "results" / "momentum_sphere.png"
+
+
+        output_path = Path(save_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        self.logger.info("Momentum sphere plot saved: %s", output_path)
+
+        if show:
+            fig.show()
+
+        return fig
+
+
+    def render_3D(self):
+        """Use Meshcat to produce a 3D visualization of the spacecraft trajectory and attitude over time."""
+        # TODO
+
+        return
+    
+
+        
