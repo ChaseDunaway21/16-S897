@@ -8,17 +8,15 @@ simulation_properties:
     value: False
 
   - name: time_step
-    value: 0.5 # seconds
+    value: 0.1 # seconds
 
   - name: max_simulation_time
-    value: 1000.0 # seconds
+    value: 600.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
 
 initial_conditions:
-
-    # I will later add the option to specify orbital parameters instead of state directly  
 
   - name: semi-major_axis
     value: 6968000.0 # m
@@ -187,3 +185,14 @@ integration_properties:
   # For future use in the potential of using a different integration scheme
   - name: integration_method
     value: rk4
+
+plotting_properties:
+
+  - name: layout
+    value: separate # together or separate
+
+  - name: attitude_plot_layout
+    value: overlay # overlay or stacked; applies to attitude and angular velocity plots
+
+  - name: attitude_representation
+    value: euler # quaternion or euler
