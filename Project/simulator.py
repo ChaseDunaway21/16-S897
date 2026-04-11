@@ -13,6 +13,7 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from world.models.constants import MU_EARTH
 from world.dynamics import integrate_dynamics
@@ -58,6 +59,7 @@ class Simulator:
     def __init__(self, config_path: str | Path, output_dir: str | Path | None = None) -> None:
         self.config_path = Path(config_path)
         self._output_dir_explicit = output_dir is not None
+        self.single_run_seed: int | None = None
 
         if output_dir is None:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -79,6 +81,7 @@ class Simulator:
         effective_config_path = self.config_path
         if (not monte_carlo_enabled) and (not ideal_enabled):
             base_seed = int(mc_item.get("seed", 42))
+            self.single_run_seed = base_seed
             trial_cfg = self._build_trial_config(
                 trial_index=0,
                 seed=base_seed,
@@ -106,6 +109,11 @@ class Simulator:
             self._property_value(self.cfg.get("simulation_properties", []), "log_interval_steps", 1000)
         )
         self.log_file = self._setup_logger()
+        if self.single_run_seed is not None:
+            self.logger.info(
+                "Single non-ideal run uses deterministic sampled parameters with seed=%d",
+                self.single_run_seed,
+            )
 
     @staticmethod
     def _property_value(items: Iterable[Dict], target_name: str, default: float | int | str) -> float | int | str:
@@ -558,7 +566,7 @@ class Simulator:
         return fig
 
     def plot_momentum_sphere(self, result: dict[str, np.ndarray | float | int], show: bool = True, save_path: str | Path | None = None) -> None:
-        """Plot the spacecraft's angular momentum sphere"""
+        """Plot the spacecraft's normalized body angular momentum on the unit sphere."""
 
         history = np.asarray(result["state_history_si"], dtype=float)
         w = history[:, self.idx["ATTITUDE_RATE"]]
@@ -569,6 +577,7 @@ class Simulator:
         h_norm = np.linalg.norm(h_body, axis=1, keepdims=True)
         h_norm[h_norm == 0.0] = 1.0
         momentum_history = (h_body / h_norm).T
+        principal_moments, principal_axes = np.linalg.eigh(J)
         
         u = np.linspace(-np.pi, np.pi, 100)
         v = np.linspace(0, np.pi, 100)
@@ -586,25 +595,75 @@ class Simulator:
             momentum_history[0, :],
             momentum_history[1, :],
             momentum_history[2, :],
-            linewidth=2.0,
+            linewidth=2.4,
             color="#0f172a",
-            alpha=0.9,
+            alpha=0.95,
         )
-        color_progress = np.linspace(0.0, 1.0, n)
-        ax.scatter(
-            momentum_history[0, :],
-            momentum_history[1, :],
-            momentum_history[2, :],
-            c=color_progress,
-            cmap="plasma",
-            s=6,
-            alpha=0.85,
-        )
-        ax.set_title("Angular Momentum Sphere")
-        ax.set_xlabel("Lx [kg*m^2/s]")
-        ax.set_ylabel("Ly [kg*m^2/s]")
-        ax.set_zlabel("Lz [kg*m^2/s]")
+        axis_colors = ["#dc2626", "#16a34a", "#2563eb"]
+        legend_handles = [
+            Line2D([0], [0], color="#0f172a", linewidth=2.0, label="Momentum path"),
+        ]
+        for i, (moment, color) in enumerate(zip(principal_moments, axis_colors), start=1):
+            axis_vec = principal_axes[:, i - 1]
+            pos_point = axis_vec
+            neg_point = -axis_vec
+
+            ax.scatter(
+                pos_point[0],
+                pos_point[1],
+                pos_point[2],
+                color=color,
+                s=80,
+                marker="o",
+                edgecolors="white",
+                linewidths=0.9,
+                zorder=5,
+            )
+            ax.scatter(
+                neg_point[0],
+                neg_point[1],
+                neg_point[2],
+                color=color,
+                s=90,
+                marker="X",
+                edgecolors="white",
+                linewidths=0.9,
+                zorder=5,
+            )
+
+            legend_handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    color="w",
+                    markerfacecolor=color,
+                    markeredgecolor="white",
+                    markeredgewidth=0.9,
+                    markersize=9,
+                    label=f"+ Principal Axis {i}",
+                )
+            )
+            legend_handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    marker="X",
+                    color="w",
+                    markerfacecolor=color,
+                    markeredgecolor="white",
+                    markeredgewidth=0.9,
+                    markersize=9,
+                    label=f"- Principal Axis {i}",
+                )
+            )
+
+        ax.set_title("Normalized Body Angular Momentum Sphere")
+        ax.set_xlabel("Lx / ||L|| [-]")
+        ax.set_ylabel("Ly / ||L|| [-]")
+        ax.set_zlabel("Lz / ||L|| [-]")
         ax.set_box_aspect((1.0, 1.0, 1.0))
+        ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(0.02, 0.98), fontsize=8)
         fig.tight_layout()
 
         if save_path is None:
@@ -618,7 +677,7 @@ class Simulator:
         self.logger.info("Momentum sphere plot saved: %s", output_path)
 
         if show:
-            fig.show()
+            plt.show(block=True)
 
         return fig
 
