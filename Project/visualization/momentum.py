@@ -38,8 +38,6 @@ def plot_momentum_sphere(
     h_norm[h_norm == 0.0] = 1.0
     momentum_history = (h_body / h_norm).T
     principal_moments, principal_axes = np.linalg.eigh(inertia_tensor)
-    principal_moments = principal_moments[::-1]
-    principal_axes = principal_axes[:, ::-1]
 
     u = np.linspace(-np.pi, np.pi, 100)
     v = np.linspace(0, np.pi, 100)

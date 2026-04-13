@@ -29,6 +29,7 @@ class Spacecraft:
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
         self.inertia_tensor: np.ndarray = np.zeros((3, 3), dtype=float)
         self.position_vectors: np.ndarray = np.empty((0, 3), dtype=float)
+        self.dimension_vectors: np.ndarray = np.empty((0, 3), dtype=float)
         self.face_dimensions: list[Dict[str, np.ndarray]] = []
         self.face_normals: list[Dict[str, np.ndarray]] = []
 
@@ -96,10 +97,8 @@ class Spacecraft:
         argp = np.deg2rad(float(argument_of_perigee_deg))
         nu = np.deg2rad(float(true_anomaly_deg))
 
-        if a <= 0.0:
-            raise ValueError("semi-major_axis must be positive")
         if e < 0.0 or e >= 1.0:
-            raise ValueError("eccentricity must satisfy 0 <= e < 1 for this model")
+            raise ValueError("0 <= e < 1")
 
         p = a * (1.0 - e * e)
         cos_nu = np.cos(nu)
@@ -126,6 +125,7 @@ class Spacecraft:
         velocity = rotation @ v_pqw
         return position, velocity
 
+    # Bunch of YAML parsing helpers
     @staticmethod
     def _geometric_center_vector(geometric_center: Dict | None) -> np.ndarray:
         """Build a 3D vector from geometric center values (x, y, z)."""
@@ -135,6 +135,19 @@ class Spacecraft:
                 float(geometric_center.get("x", 0.0)),
                 float(geometric_center.get("y", 0.0)),
                 float(geometric_center.get("z", 0.0)),
+            ],
+            dtype=float,
+        )
+
+    @staticmethod
+    def _dimensions_vector(dimensions: Dict | None) -> np.ndarray:
+        """Build a component size vector from YAML dimensions (x, y, z)."""
+        dimensions = dimensions or {}
+        return np.array(
+            [
+                float(dimensions.get("x", 0.0)),
+                float(dimensions.get("y", 0.0)),
+                float(dimensions.get("z", 0.0)),
             ],
             dtype=float,
         )
@@ -210,6 +223,7 @@ class Spacecraft:
 
         names: list[str] = []
         masses: list[float] = []
+        dimension_vectors: list[np.ndarray] = []
         face_dimensions: list[Dict[str, np.ndarray]] = []
         face_normals: list[Dict[str, np.ndarray]] = []
         geometric_centers: list[np.ndarray] = []
@@ -217,17 +231,22 @@ class Spacecraft:
         for item in physical_properties:
             name = str(item.get("name", "unknown_component"))
             mass = float(item.get("mass", 0.0))
+            dimensions = self._dimensions_vector(item.get("dimensions"))
             geometric_center = self._geometric_center_vector(item.get("geometric_center"))
             component_faces = self._face_vectors(item.get("faces"))
 
             names.append(name)
             masses.append(mass)
+            dimension_vectors.append(dimensions)
             face_dimensions.append(component_faces["face_dimensions"])
             face_normals.append(component_faces["face_normals"])
             geometric_centers.append(geometric_center)
 
         self.names = names
         self.mass_vector = np.asarray(masses, dtype=float)
+        self.dimension_vectors = (
+            np.vstack(dimension_vectors) if dimension_vectors else np.empty((0, 3), dtype=float)
+        )
         self.position_vectors = (
             np.vstack(geometric_centers) if geometric_centers else np.empty((0, 3), dtype=float)
         )
@@ -243,16 +262,29 @@ class Spacecraft:
         if total_mass == 0.0:
             raise ValueError("Total mass is zero")
 
-        return np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0) / total_mass
+        com = np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0) / total_mass
+
+        return com
 
     def compute_inertia_tensor(self) -> np.ndarray:
         """Compute inertia tensor from loaded component masses and positions."""
 
+        center_of_mass = self.compute_center_of_mass()
         inertia_tensor = np.zeros((3, 3), dtype=float)
 
-        for mass, position in zip(self.mass_vector, self.position_vectors):
-            r_squared = float(np.dot(position, position))
-            inertia_tensor += mass * (r_squared * np.eye(3) - np.outer(position, position))
+        for mass, position, dimensions in zip(self.mass_vector, self.position_vectors, self.dimension_vectors):
+            dx, dy, dz = np.asarray(dimensions, dtype=float)
+            local_inertia = (float(mass) / 12.0) * np.diag( # Inertia for rectangular prisms
+                [
+                    dy**2 + dz**2,
+                    dx**2 + dz**2,
+                    dx**2 + dy**2,
+                ]
+            )
+
+            r = np.asarray(position, dtype=float) - center_of_mass
+            parallel_axis = float(mass) * (np.dot(r, r) * np.eye(3) - np.outer(r, r    ))
+            inertia_tensor += local_inertia + parallel_axis
 
         self.inertia_tensor = inertia_tensor
 
