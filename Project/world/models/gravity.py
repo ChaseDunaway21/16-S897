@@ -3,7 +3,7 @@ Author: Chase Dunaway
 
 Gravity Model for the Satellite Simulation.
 The model is simply based on a spherical acceleration model.
-"Position" is assumed to be in ECEF
+"Position" is assumed to be in ECI
 
 Inspiration comes from ARGUS-2's simulation framework
 """
