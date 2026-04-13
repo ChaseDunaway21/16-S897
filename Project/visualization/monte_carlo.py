@@ -214,8 +214,8 @@ def plot_monte_carlo_trials(
         with np.load(state_path) as data:
             times = np.asarray(data["times_s"], dtype=float)
             history = np.asarray(data["state_history_si"], dtype=float)
-        position_trials.append((times, history[:, ctx.idx["POS_ECEF"]]))
-        velocity_trials.append((times, history[:, ctx.idx["VEL_ECEF"]]))
+        position_trials.append((times, history[:, ctx.idx["POS_ECI"]]))
+        velocity_trials.append((times, history[:, ctx.idx["VEL_ECI"]]))
         attitude_trials.append((times, attitude_plot_values(ctx, history[:, ctx.idx["ATTITUDE"]])))
         omega_trials.append((times, history[:, ctx.idx["ATTITUDE_RATE"]]))
 

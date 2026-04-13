@@ -37,8 +37,8 @@ class Spacecraft:
         self.state_size: int = self.BASE_STATE_SIZE
         self.Idx: dict[str, dict[str, slice]] = {
             "X": {
-                "POS_ECEF": slice(0, 3),
-                "VEL_ECEF": slice(3, 6),
+                "POS_ECI": slice(0, 3),
+                "VEL_ECI": slice(3, 6),
                 "ATTITUDE": slice(6, 10),
                 "ATTITUDE_RATE": slice(10, 13),
             }
@@ -46,8 +46,8 @@ class Spacecraft:
         self.state: np.ndarray = np.zeros(self.state_size, dtype=float)
 
         # Placeholder defaults; load_config sets these from YAML initial_conditions.
-        self.position_ecef: np.ndarray = np.zeros(3, dtype=float)
-        self.velocity_ecef: np.ndarray = np.zeros(3, dtype=float)
+        self.position_eci: np.ndarray = np.zeros(3, dtype=float)
+        self.velocity_eci: np.ndarray = np.zeros(3, dtype=float)
         self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
         self.attitude_rate: np.ndarray = np.zeros(3, dtype=float)
 
@@ -59,15 +59,15 @@ class Spacecraft:
             raise ValueError(f"state must be a 1D vector with {self.state_size} elements")
 
         self.state = state.astype(float)
-        self.position_ecef = self.state[self.Idx["X"]["POS_ECEF"]]
-        self.velocity_ecef = self.state[self.Idx["X"]["VEL_ECEF"]]
+        self.position_eci = self.state[self.Idx["X"]["POS_ECI"]]
+        self.velocity_eci = self.state[self.Idx["X"]["VEL_ECI"]]
         self.attitude = self.state[self.Idx["X"]["ATTITUDE"]]
         self.attitude_rate = self.state[self.Idx["X"]["ATTITUDE_RATE"]]
 
     def get_state(self) -> np.ndarray:
         """Return full state vector sized by the model configuration."""
-        self.state[self.Idx["X"]["POS_ECEF"]] = self.position_ecef
-        self.state[self.Idx["X"]["VEL_ECEF"]] = self.velocity_ecef
+        self.state[self.Idx["X"]["POS_ECI"]] = self.position_eci
+        self.state[self.Idx["X"]["VEL_ECI"]] = self.velocity_eci
         self.state[self.Idx["X"]["ATTITUDE"]] = self.attitude
         self.state[self.Idx["X"]["ATTITUDE_RATE"]] = self.attitude_rate
         return self.state
@@ -183,8 +183,8 @@ class Spacecraft:
 
         self.Idx = {
             "X": {
-                "POS_ECEF": slice(0, 3),
-                "VEL_ECEF": slice(3, 6),
+                "POS_ECI": slice(0, 3),
+                "VEL_ECI": slice(3, 6),
                 "ATTITUDE": slice(6, 10),
                 "ATTITUDE_RATE": slice(10, 13),
             }
@@ -215,8 +215,8 @@ class Spacecraft:
             raise ValueError("initial_conditions.attitude_rate must be a 3-element angular velocity vector [wx, wy, wz]")
 
         initial_state = np.zeros(self.state_size, dtype=float)
-        initial_state[self.Idx["X"]["POS_ECEF"]] = position_init
-        initial_state[self.Idx["X"]["VEL_ECEF"]] = velocity_init
+        initial_state[self.Idx["X"]["POS_ECI"]] = position_init
+        initial_state[self.Idx["X"]["VEL_ECI"]] = velocity_init
         initial_state[self.Idx["X"]["ATTITUDE"]] = attitude_init
         initial_state[self.Idx["X"]["ATTITUDE_RATE"]] = attitude_rate_init
         self.set_state(initial_state)

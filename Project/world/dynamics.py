@@ -64,8 +64,8 @@ def attitude_dynamics(
 def orbital_dynamics(state: np.ndarray, state_dot: np.ndarray, state_index: dict) -> np.ndarray:
     """Compute translational orbital dynamics in the full state vector."""
 
-    pos_slice = state_index["POS_ECEF"]
-    vel_slice = state_index["VEL_ECEF"]
+    pos_slice = state_index["POS_ECI"]
+    vel_slice = state_index["VEL_ECI"]
 
     state_dot[pos_slice] = state[vel_slice]
     state_dot[vel_slice] = gravity.acceleration(state[pos_slice])

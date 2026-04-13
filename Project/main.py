@@ -44,8 +44,8 @@ def main() -> None:
 	print(f"Steps: {result['num_steps']}")
 	print(f"Log file: {result['log_file']}")
 	print("Final spacecraft state (SI units):")
-	print(f"  position [m]: {sim.spacecraft.position_ecef}")
-	print(f"  velocity [m/s]: {sim.spacecraft.velocity_ecef}")
+	print(f"  position [m]: {sim.spacecraft.position_eci}")
+	print(f"  velocity [m/s]: {sim.spacecraft.velocity_eci}")
 	print(f"  attitude [-]: {sim.spacecraft.attitude}")
 	print(f"  omega [rad/s]: {sim.spacecraft.attitude_rate}")
 

@@ -51,8 +51,8 @@ def _run_single_monte_carlo_trial(
         "log_file": str(result["log_file"]),
         "state_file": str(state_file),
         "num_steps": int(result["num_steps"]),
-        "final_position_m": final_state[idx["POS_ECEF"]].tolist(),
-        "final_velocity_ms": final_state[idx["VEL_ECEF"]].tolist(),
+        "final_position_m": final_state[idx["POS_ECI"]].tolist(),
+        "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
         "final_attitude": final_state[idx["ATTITUDE"]].tolist(),
         "final_omega_rads": final_state[idx["ATTITUDE_RATE"]].tolist(),
     }
@@ -290,15 +290,15 @@ class Simulator:
             message += f" | t={time_s:.2f} s"
 
         self.logger.info(message)
-        self.logger.info("  position [m]: %s", self._vector_to_string(state[self.idx["POS_ECEF"]]))
-        self.logger.info("  velocity [m/s]: %s", self._vector_to_string(state[self.idx["VEL_ECEF"]]))
+        self.logger.info("  position [m]: %s", self._vector_to_string(state[self.idx["POS_ECI"]]))
+        self.logger.info("  velocity [m/s]: %s", self._vector_to_string(state[self.idx["VEL_ECI"]]))
         self.logger.info("  attitude [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE"]]))
         self.logger.info("  omega [rad/s]: %s", self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]))
 
     def run(self) -> dict[str, np.ndarray | float | int]:
         state = self.spacecraft.get_state().astype(float, copy=True)
 
-        orbit_period = self._orbit_period_seconds(state[self.idx["POS_ECEF"]])
+        orbit_period = self._orbit_period_seconds(state[self.idx["POS_ECI"]])
         sim_duration = self.max_simulation_time
         num_steps = int(np.ceil(sim_duration / self.dt))
         self.logger.info(
@@ -331,11 +331,11 @@ class Simulator:
 
         final_state = history[-1]
 
-        final_pos_m = final_state[self.idx["POS_ECEF"]]
-        final_vel_ms = final_state[self.idx["VEL_ECEF"]]
+        final_pos_m = final_state[self.idx["POS_ECI"]]
+        final_vel_ms = final_state[self.idx["VEL_ECI"]]
         updated_state = self.spacecraft.get_state()
-        updated_state[self.idx["POS_ECEF"]] = final_pos_m
-        updated_state[self.idx["VEL_ECEF"]] = final_vel_ms
+        updated_state[self.idx["POS_ECI"]] = final_pos_m
+        updated_state[self.idx["VEL_ECI"]] = final_vel_ms
         self.spacecraft.set_state(updated_state)
 
         self.logger.info("Simulation complete")

@@ -18,6 +18,7 @@ from .common import (
     style_time_axis,
 )
 from world.math import quaternion_to_euler
+from world.models.constants import RADIUS_EARTH
 
 
 class SimulationPlotContext(Protocol):
@@ -28,6 +29,9 @@ class SimulationPlotContext(Protocol):
     output_dir: Path | None
     config_path: Path
     logger: logging.Logger
+
+
+EARTH_RADIUS_KM = RADIUS_EARTH / 1_000.0
 
 
 def attitude_plot_values(ctx: SimulationPlotContext, attitudes: np.ndarray) -> np.ndarray:
@@ -100,10 +104,46 @@ def simulation_plot_paths(
     }
 
 
+def orbit_extent_points(pos_km: np.ndarray) -> np.ndarray:
+    earth_extent_points = np.array(
+        [
+            [EARTH_RADIUS_KM, 0.0, 0.0],
+            [-EARTH_RADIUS_KM, 0.0, 0.0],
+            [0.0, EARTH_RADIUS_KM, 0.0],
+            [0.0, -EARTH_RADIUS_KM, 0.0],
+            [0.0, 0.0, EARTH_RADIUS_KM],
+            [0.0, 0.0, -EARTH_RADIUS_KM],
+        ],
+        dtype=float,
+    )
+    return np.vstack((np.asarray(pos_km, dtype=float), earth_extent_points))
+
+
+def plot_earth_sphere(ax: plt.Axes) -> None:
+    u = np.linspace(0.0, 2.0 * np.pi, 80)
+    v = np.linspace(0.0, np.pi, 40)
+    uu, vv = np.meshgrid(u, v)
+    x = EARTH_RADIUS_KM * np.cos(uu) * np.sin(vv)
+    y = EARTH_RADIUS_KM * np.sin(uu) * np.sin(vv)
+    z = EARTH_RADIUS_KM * np.cos(vv)
+    ax.plot_surface(
+        x,
+        y,
+        z,
+        color="#2563eb",
+        alpha=0.20,
+        edgecolor="none",
+        antialiased=True,
+        shade=True,
+        zorder=0,
+    )
+
+
 def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     fig = plt.figure(figsize=(10, 9), facecolor=FIGURE_FACE_COLOR)
     ax = fig.add_subplot(1, 1, 1, projection="3d")
     ax.set_facecolor(AXIS_FACE_COLOR)
+    plot_earth_sphere(ax)
     ax.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#0f766e", alpha=0.95)
     ax.scatter(
         pos_km[0, 0],
@@ -127,12 +167,12 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
         label="end",
         zorder=3,
     )
-    ax.set_title("Trajectory (ECEF)")
+    ax.set_title("Trajectory (ECI)")
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
     ax.set_zlabel("z [km]")
     ax.legend(loc="best")
-    set_equal_orbit_axes(ax, pos_km)
+    set_equal_orbit_axes(ax, orbit_extent_points(pos_km))
     fig.tight_layout()
     return fig
 
@@ -240,6 +280,7 @@ def plot_simulation_overview(
 
     ax_orbit = fig.add_subplot(gs[0, 0], projection="3d")
     ax_orbit.set_facecolor(AXIS_FACE_COLOR)
+    plot_earth_sphere(ax_orbit)
     ax_orbit.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#0f766e", alpha=0.95)
     ax_orbit.scatter(
         pos_km[0, 0],
@@ -263,12 +304,12 @@ def plot_simulation_overview(
         label="end",
         zorder=3,
     )
-    ax_orbit.set_title("Trajectory (ECEF)")
+    ax_orbit.set_title("Trajectory (ECI)")
     ax_orbit.set_xlabel("x [km]")
     ax_orbit.set_ylabel("y [km]")
     ax_orbit.set_zlabel("z [km]")
     ax_orbit.legend(loc="best")
-    set_equal_orbit_axes(ax_orbit, pos_km)
+    set_equal_orbit_axes(ax_orbit, orbit_extent_points(pos_km))
 
     ax_vel = fig.add_subplot(gs[0, 1])
     style_time_axis(ax_vel)
@@ -353,8 +394,8 @@ def plot_simulation(
     times = np.asarray(result["times_s"], dtype=float)
     history = np.asarray(result["state_history_si"], dtype=float)
 
-    pos_km = history[:, ctx.idx["POS_ECEF"]] / 1_000.0
-    vel_kms = history[:, ctx.idx["VEL_ECEF"]] / 1_000.0
+    pos_km = history[:, ctx.idx["POS_ECI"]] / 1_000.0
+    vel_kms = history[:, ctx.idx["VEL_ECI"]] / 1_000.0
     att = history[:, ctx.idx["ATTITUDE"]]
     att_rate = history[:, ctx.idx["ATTITUDE_RATE"]]
     current_attitude_spec = attitude_plot_spec(ctx, att)
