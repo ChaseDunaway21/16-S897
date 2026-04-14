@@ -319,7 +319,7 @@ The following moment of inertia matrices were calculated for the five main discr
 
 \noindent
 \begingroup
-\tiny
+\small
 \setlength{\abovedisplayskip}{4pt}
 \setlength{\belowdisplayskip}{4pt}
 \setlength{\abovedisplayshortskip}{4pt}
@@ -341,14 +341,14 @@ The following moment of inertia matrices were calculated for the five main discr
 \begin{minipage}[t]{0.48\textwidth}
 \[
 \begin{aligned}[t]
-\mathbf{J}_{x+,\text{deployable}} &=
+\mathbf{J}_{x+,\text{depl.}} &=
 \begin{bmatrix}
 9.01\times10^{-3} & -4.34\times10^{-6} & -2.03\times10^{-3} \\
 -4.34\times10^{-6} & 9.48\times10^{-3} & -1.92\times10^{-5} \\
 -2.03\times10^{-3} & -1.92\times10^{-5} & 5.23\times10^{-4}
 \end{bmatrix}
 \\[0.8em]
-\mathbf{J}_{x-,\text{deployable}} &=
+\mathbf{J}_{x-,\text{depl.}} &=
 \begin{bmatrix}
 7.73\times10^{-3} & 3.76\times10^{-6} & 1.76\times10^{-3} \\
 3.76\times10^{-6} & 8.14\times10^{-3} & -1.65\times10^{-5} \\
@@ -363,14 +363,14 @@ The following moment of inertia matrices were calculated for the five main discr
 \begin{minipage}[t]{0.48\textwidth}
 \[
 \begin{aligned}[t]
-\mathbf{J}_{y+,\text{deployable}} &=
+\mathbf{J}_{y+,\text{depl.}} &=
 \begin{bmatrix}
 5.42\times10^{-3} & 1.35\times10^{-6} & 5.90\times10^{-6} \\
 1.35\times10^{-6} & 5.15\times10^{-3} & -1.18\times10^{-3} \\
 5.90\times10^{-6} & -1.18\times10^{-3} & 3.07\times10^{-4}
 \end{bmatrix}
 \\[0.8em]
-\mathbf{J}_{y-,\text{deployable}} &=
+\mathbf{J}_{y-,\text{depl.}} &=
 \begin{bmatrix}
 7.93\times10^{-3} & -1.94\times10^{-6} & 8.63\times10^{-6} \\
 -1.94\times10^{-6} & 7.54\times10^{-3} & 1.69\times10^{-3} \\
@@ -387,46 +387,30 @@ The following moment of inertia matrices were calculated for the five main discr
 
 Using equation \eqref{eq:Jcom}, the total moment of inertia of ARGUS is calculated to be
 
-\begin{equation}
-\mathbf{J}_{\text{spacecraft}} =
+\begin{align}
+\mathbf{J}_{\text{spacecraft}} &=
 \begin{bmatrix}
 3.59\times10^{-2} & -6.21\times10^{-7} & -2.90\times10^{-4} \\
 -6.21\times10^{-7} & 3.61\times10^{-2} & 5.41\times10^{-4} \\
 -2.90\times10^{-4} & 5.41\times10^{-4} & 3.64\times10^{-3}
 \end{bmatrix}
-\quad [\mathrm{kg\,m^2}]
-\end{equation}
-
-\begin{equation}
-\mathbf{J}_{\text{principal}} =
+\quad [\mathrm{kg\,m^2}]\\
+\mathbf{J}_{\text{principal}} &=
 \begin{bmatrix}
 3.63\times10^{-3} & 0 & 0 \\
 0 & 3.59\times10^{-2} & 0 \\
 0 & 0 & 3.61\times10^{-2}
 \end{bmatrix}
-\quad [\mathrm{kg\,m^2}]
-\end{equation}
-
-\begin{equation}
-\mathbf{{}^{N}R^{B}}=
+\quad [\mathrm{kg\,m^2}]\\
+\mathbf{{}^{N}R^{B}} &=
 \begin{bmatrix}
 9.01\times10^{-3} & -1.67\times10^{-2} & 1.00 \\
 1.00 & 2.48\times10^{-2} & -8.60\times10^{-3} \\
 2.46\times10^{-2} & -1.00 & -1.69\times10^{-2}
 \end{bmatrix}
-\end{equation}
+\end{align}
 
 \vspace{1em}
-
-\begin{equation}
-\mathbf{J}_{\text{spacecraft}} =
-\begin{bmatrix}
-3.586173\times10^{-2} & -6.210061\times10^{-7} & -2.904824\times10^{-4} \\
--6.210061\times10^{-7} & 3.607677\times10^{-2} & 5.407120\times10^{-4} \\
--2.904824\times10^{-4} & 5.407120\times10^{-4} & 3.644793\times10^{-3}
-\end{bmatrix}
-\quad [\mathrm{kg\,m^2}]
-\end{equation}
 
 \subsection{Principal Axes}
 The principal axes are the eigenvectors of the inertia tensor, i.e.
