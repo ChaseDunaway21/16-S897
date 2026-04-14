@@ -36,7 +36,7 @@
   \begin{tabularx}{\textwidth}{@{}l l l >{\raggedright\arraybackslash}X@{}}
     \textbf{Version} & \textbf{Date} & \textbf{Author} & \textbf{Changes} \\
     \hline
-    \changelogentry{v1.0}{2026-04-08}{Chase Dunaway}{Initial draft. Homework 1 submission.}
+    \changelogentry{v1.0}{2026-04-14}{Chase Dunaway}{Initial draft. Homework 1 submission.}
   \end{tabularx}
 }
 
@@ -70,7 +70,7 @@ ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination usin
 \end{figure}
 
 \subsection{Mission Purpose}
-The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat}. GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positing systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
+The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat}. GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positioning systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
 
 \subsection{Orbit Description}
 ARGUS is planned for launch in Summer 2026 and deployment into a sun-synchronous low Earth orbit with an altitude of approximately \(600\) km and an inclination of approximately \(100^\circ\).
@@ -116,13 +116,13 @@ The attitude control system consists of six magnetorquers arranged in each of th
 ARGUS is modeled as a collection a main, uniform-density cube and $4$ rigid components defined in the configuration file. For each component $i$, the configuration specifies a mass $m_i$, a geometric center $\mathbf{r}_i \in \mathbb{R}^3$, and a set of exposed faces with dimensions and outward normals.
 
 \subsection{Discretization \& Configuration File}
-The spacecraft model, initial conditions, and simulation settings are defined in a YAML configuration file. The approximate model and config file (units are in SI) are shown below.
+The spacecraft model, initial conditions, and simulation settings are defined in a YAML configuration file. The approximate model and config file (units are in SI) are shown below, with the origin being specified in the center of the main body:
 
 \begin{figure}[ht]
   \centering
   \begin{minipage}[t]{0.49\linewidth}
     \centering
-    \includegraphics[width=0.6\linewidth]{\detokenize{ARGUS Satellite Images/Core.png}}\\
+    \includegraphics[width=0.6\linewidth]{\detokenize{ARGUS Satellite Images/Body and Coordinates.png}}\\
     {\footnotesize Main Body $\approx$ Cube}
   \end{minipage}
   \begin{minipage}[t]{0.49\linewidth}
@@ -132,6 +132,13 @@ The spacecraft model, initial conditions, and simulation settings are defined in
   \end{minipage}
   \caption{Two major discretized components used to define the spacecraft model.}
   \label{fig:argus-config-geometry}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.8\linewidth]{ARGUS Satellite Images/Discretized Components.png}
+    \caption{Discretized Components}
+    \label{fig:discretized-components}
 \end{figure}
 
 \begin{figure}[H]
@@ -187,7 +194,7 @@ physical_properties:
     geometric_center:
       x: 0.1
       y: 0.0
-      z: 0.498075
+      z: -0.498075
     normal_vector:
       x: 1.0
       y: 0.0
@@ -210,7 +217,7 @@ physical_properties:
     geometric_center:
       x: -0.1
       y: 0.0
-      z: 0.498075
+      z: -0.498075
     normal_vector:
       x: -1.0
       y: 0.0
@@ -239,7 +246,7 @@ physical_properties:
     geometric_center:
       x: 0.0
       y: 0.1
-      z: 0.498075
+      z: -0.498075
     normal_vector:
       x: 0.0
       y: 1.0
@@ -262,7 +269,7 @@ physical_properties:
     geometric_center:
       x: 0.0
       y: -0.1
-      z: 0.498075
+      z: -0.498075
     normal_vector:
       x: 0.0
       y: -1.0
@@ -308,7 +315,7 @@ For brevity, $\mathbf{J}_{\mathrm{C.o.M.}}$ will be simplified as $\mathbf{J}$.
 \textbf{Note:} Under ideal modeling assumptions, ARGUS is completely symmetric about the $z$-axis. To make perturbations (and the later momentum-sphere trajectories) visible, a small mass deviation is intentionally introduced; this can be seen in the configuration file.
 \end{quote}
 
-The following moment of inertia matrices were calculated for the five main discretized components:
+The following moment of inertia matrices were calculated for the five main discretized components
 
 \noindent
 \begingroup
@@ -378,7 +385,7 @@ The following moment of inertia matrices were calculated for the five main discr
 
 \vspace{1em}
 
-Using equation \eqref{eq:Jcom}, the total moment of inertia of ARGUS is calculated to be:
+Using equation \eqref{eq:Jcom}, the total moment of inertia of ARGUS is calculated to be
 
 \begin{equation}
 \mathbf{J}_{\text{spacecraft}} =
@@ -426,7 +433,7 @@ The principal axes are the eigenvectors of the inertia tensor, i.e.
 \begin{equation}
 \mathbf{J}\mathbf{e}_i = \lambda_i \mathbf{e}_i
 \end{equation}
-where the eigenvalues $\lambda_i$ are the principal moments of inertia. In this report, the moments are ordered:
+where the eigenvalues $\lambda_i$ are the principal moments of inertia. In this report, the moments are ordered
 \begin{equation}
 J_{1,1} \le J_{2,2} \le J_{3,3}
 \end{equation}
@@ -441,7 +448,7 @@ The configuration file stores the face normals $\mathbf{n}_{ij}$ and geometric d
 \section{Dynamics}
 
 \subsection{System State}
-The full spacecraft state is:
+The full spacecraft state is
 \begin{equation}
 \mathbf{x} =
 \begin{bmatrix}
@@ -473,7 +480,7 @@ and the perifocal velocity
 -\sin\nu \\ e+\cos\nu \\ 0
 \end{bmatrix}.
 \end{equation}
-These vectors are rotated into the inertial reference by the following rotation matrix:
+These vectors are rotated into the inertial reference by the following rotation matrix
 \begin{equation}
 \mathbf{R} =
 \begin{bmatrix}
@@ -491,7 +498,7 @@ These vectors are rotated into the inertial reference by the following rotation 
 \vspace{0.5\baselineskip}
 
 \subsection{Orbital Dynamics}
-The translational dynamics are modeled by spherical acceleration plus a $J_2$ perturbation \cite{markley2014fundamentals}: 
+The translational dynamics are modeled by spherical acceleration plus a $J_2$ perturbation \cite{markley2014fundamentals}
 \begin{equation}
 \dot{\mathbf{r}} = \mathbf{v},
 \end{equation}
@@ -510,11 +517,11 @@ z\left(5\frac{z^2}{\|\mathbf{r}\|^2}-3\right)
 \end{equation}
 
 \subsection{Quaternion Kinematics}
-The attitude kinematics are written using quaternions:
+The attitude kinematics are written using quaternions
 \begin{equation}
 \mathbf{\dot{q}} = \frac{1}{2}\mathbf{G(q)}\boldsymbol{\omega},
 \end{equation}
-Where $\mathbf{G(q)}$ is the attitude quaternion:
+Where $\mathbf{G(q)}$ is the attitude quaternion
 
 \begin{equation}
 \mathbf{\dot{q}}
@@ -533,7 +540,7 @@ Where $\mathbf{G(q)}$ is the attitude quaternion:
 \end{equation}
 
 \subsection{Numerical Integration}
-The state is propagated with RK4:
+The state is propagated with RK4
 \begin{equation}
 \mathbf{x}_{k+1} = \mathbf{x}_k + \frac{\Delta t}{6}
 \left( \mathbf{k}_1 + 2\mathbf{k}_2 + 2\mathbf{k}_3 + \mathbf{k}_4 \right),
@@ -551,7 +558,7 @@ with the quaternion being normalized after each iteration $\|\mathbf{q}\|=1$.
 \section{Euler's Equation}
 
 \subsection{Rigid-Body Attitude Dynamics}
-The dynamics for $\dot{\omega}$ are given with Euler's equation in the body frame without external torque:
+The dynamics for $\dot{\omega}$ are given with Euler's equation in the body frame without external torque
 \begin{equation}
 \mathbf{J}\dot{\boldsymbol{\omega}} + \boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega}) = \mathbf{0}.
 \end{equation}
@@ -565,7 +572,7 @@ The body angular momentum is
 \begin{equation}
 \mathbf{h} = \mathbf{J}\boldsymbol{\omega}.
 \end{equation}
-To visualize the momentum sphere, the normalized momentum vector is plotted:
+To visualize the momentum sphere, the normalized momentum vector is plotted
 \begin{equation}
 \hat{\mathbf{h}} = \frac{\mathbf{h}}{\|\mathbf{h}\|}.
 \end{equation}
