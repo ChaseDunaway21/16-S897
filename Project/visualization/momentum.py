@@ -8,6 +8,7 @@ from typing import Any, Mapping, Protocol
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
 
 from .common import AXIS_FACE_COLOR, FIGURE_FACE_COLOR, default_plot_dir, save_figure
@@ -33,24 +34,53 @@ def plot_momentum_sphere(
     w = history[:, ctx.idx["ATTITUDE_RATE"]]
     inertia_tensor = ctx.spacecraft.inertia_tensor
 
-    h_body = (inertia_tensor @ w.T).T
-    h_norm = np.linalg.norm(h_body, axis=1, keepdims=True)
+    h_body = (inertia_tensor @ w.T).T # From lecture notes
+    h_magnitude = np.linalg.norm(h_body, axis=1)
+    h_norm = h_magnitude[:, np.newaxis]
     h_norm[h_norm == 0.0] = 1.0
-    momentum_history = (h_body / h_norm).T
+    momentum_path = h_body / h_norm 
+    momentum_history = momentum_path.T
     principal_moments, principal_axes = np.linalg.eigh(inertia_tensor)
+    inertia_inverse = np.linalg.inv(inertia_tensor)
+    nonzero_magnitudes = h_magnitude[h_magnitude > 0.0]
+    reference_h_magnitude = float(np.mean(nonzero_magnitudes)) if nonzero_magnitudes.size else 1.0
 
     u = np.linspace(-np.pi, np.pi, 100)
     v = np.linspace(0, np.pi, 100)
     U, V = np.meshgrid(u, v)
 
-    x = np.cos(U) * np.sin(V)
-    y = np.sin(U) * np.sin(V)
-    z = np.cos(V)
+    # The factor 0.95 plots the path floating above the sphere slightly
+    x = 0.95 * np.cos(U) * np.sin(V)
+    y = 0.95 * np.sin(U) * np.sin(V)
+    z = 0.95 * np.cos(V)
+    sphere_directions = np.stack((x, y, z), axis=-1)
+    energy_field = 0.5 * reference_h_magnitude**2 * np.einsum(
+        "...i,ij,...j->...",
+        sphere_directions,
+        inertia_inverse,
+        sphere_directions,
+    )
+    energy_min = float(np.min(energy_field))
+    energy_max = float(np.max(energy_field))
+    if np.isclose(energy_min, energy_max):
+        energy_max = energy_min + 1.0
+    energy_norm = Normalize(vmin=energy_min, vmax=energy_max)
+    energy_cmap = plt.get_cmap("cividis")
+    sphere_facecolors = energy_cmap(energy_norm(energy_field))
+    sphere_facecolors[..., -1] = 0.45
 
     fig = plt.figure(figsize=(9, 8), facecolor=FIGURE_FACE_COLOR)
     ax = plt.subplot(1, 1, 1, projection="3d")
     ax.set_facecolor(AXIS_FACE_COLOR)
-    ax.plot_surface(x, y, z, cmap="Blues", alpha=0.22, edgecolor="none", antialiased=True)
+    ax.plot_surface(
+        x,
+        y,
+        z,
+        facecolors=sphere_facecolors,
+        shade=False,
+        edgecolor="none",
+        antialiased=True,
+    )
     ax.plot(
         momentum_history[0, :],
         momentum_history[1, :],
@@ -59,9 +89,53 @@ def plot_momentum_sphere(
         color="#0f172a",
         alpha=0.95,
     )
+    ax.scatter(
+        momentum_path[0, 0],
+        momentum_path[0, 1],
+        momentum_path[0, 2],
+        color="#f59e0b",
+        s=55,
+        marker="o",
+        edgecolors="white",
+        linewidths=0.9,
+        zorder=6,
+    )
+    ax.scatter(
+        momentum_path[-1, 0],
+        momentum_path[-1, 1],
+        momentum_path[-1, 2],
+        color="#111827",
+        s=55,
+        marker="s",
+        edgecolors="white",
+        linewidths=0.9,
+        zorder=6,
+    )
     axis_colors = ["#dc2626", "#16a34a", "#2563eb"]
     legend_handles = [
         Line2D([0], [0], color="#0f172a", linewidth=2.0, label="Momentum path"),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#f59e0b",
+            markeredgecolor="white",
+            markeredgewidth=0.9,
+            markersize=8,
+            label="Start",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="s",
+            color="w",
+            markerfacecolor="#111827",
+            markeredgecolor="white",
+            markeredgewidth=0.9,
+            markersize=8,
+            label="End",
+        ),
     ]
     for i, (_, color) in enumerate(zip(principal_moments, axis_colors), start=1):
         axis_vec = principal_axes[:, i - 1]
@@ -118,12 +192,19 @@ def plot_momentum_sphere(
             )
         )
 
-    ax.set_title("Normalized Body Angular Momentum Sphere")
+    ax.set_title("Normalized Body Angular Momentum Sphere with Energy Gradient")
     ax.set_xlabel("Lx / ||L|| [-]")
     ax.set_ylabel("Ly / ||L|| [-]")
     ax.set_zlabel("Lz / ||L|| [-]")
     ax.set_box_aspect((1.0, 1.0, 1.0))
     ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(0.02, 0.98), fontsize=8)
+    colorbar = fig.colorbar(
+        plt.cm.ScalarMappable(norm=energy_norm, cmap=energy_cmap),
+        ax=ax,
+        shrink=0.72,
+        pad=0.08,
+    )
+    colorbar.set_label("Rotational kinetic energy [J]")
     fig.tight_layout()
 
     output_path = save_path
