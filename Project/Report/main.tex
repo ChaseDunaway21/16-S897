@@ -305,7 +305,7 @@ In the methodology used to configure ARGUS in the simulator, the dimensions and 
 \end{equation}
 and compute
 \begin{equation}
-\mathbf{J}_{\mathrm{C.o.M.}} = \sum_{i=1}^{N} m_i \left( \|\boldsymbol{r}'\|^2 \mathbf{I} - \boldsymbol{r}' \boldsymbol{r}_i'^T \right)
+\mathbf{J}_{\mathrm{C.o.M.}} = \sum_{j=1}^{M} J_j + \sum_{k=1}^{P} m_k \left( \mathbf{r'}_k^T \mathbf{r'}_k \mathbf{I} - \mathbf{r'}_k \mathbf{r'}_k^T \right)
 \label{eq:Jcom}
 \end{equation}
 
