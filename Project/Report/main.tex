@@ -1,0 +1,642 @@
+\documentclass[conference,onecolumn,draftclsnofoot]{IEEEtran}
+
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{subcaption}
+
+% Larger heading font sizes
+\titleformat{\section}{\normalfont\LARGE\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalfont\medium\bfseries}{\thesubsubsection}{1em}{}
+
+% Header/footer: title + author + page numbers
+\pagestyle{fancy}
+\fancyhf{} % clear all fields
+\fancyhead[L]{16.S897 Project Technical Report}
+\fancyhead[R]{Chase Dunaway}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\newcommand{\changelogentry}[4]{#1 & #2 & #3 & #4\\}
+
+\newcommand{\printchangelog}{%
+  \begin{center}
+    {\normalsize\bfseries Changelog\par}
+  \end{center}
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabularx}{\textwidth}{@{}l l l >{\raggedright\arraybackslash}X@{}}
+    \textbf{Version} & \textbf{Date} & \textbf{Author} & \textbf{Changes} \\
+    \hline
+    \changelogentry{v1.0}{2026-04-08}{Chase Dunaway}{Initial draft. Homework 1 submission.}
+  \end{tabularx}
+}
+
+\newcommand{\githubrepo}{%
+  \begin{center}
+    {\normalsize\bfseries GitHub\par}
+    \underline{\href{https://github.com/ChaseDunaway21/16-S897.git}{github.com/ChaseDunaway21/16-S897}}
+  \end{center}
+}
+
+\title{Project Technical Report\\{\large 16.S897: Spacecraft Attitude Determination and Control Systems}}
+\author{Chase Dunaway}
+
+\begin{document}
+\maketitle
+
+
+\githubrepo
+\printchangelog
+
+\newpage
+
+\section{Introduction}
+ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination using images of Earth's surface captured by the spacecraft\footnote{Much of the following report is heavily motivated by the implementation details of the ongoing ARGUS development simulator.}. It is planned for launch in the Summer of 2026.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.4\linewidth]{\detokenize{ARGUS Satellite Images/FullBuild.png}}
+  \caption{ARGUS CAD model.}
+  \label{fig:argus-fullbuild}
+\end{figure}
+
+\subsection{Mission Purpose}
+The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat}. GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positing systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
+
+\subsection{Orbit Description}
+ARGUS is planned for launch in Summer 2026 and deployment into a sun-synchronous low Earth orbit with an altitude of approximately \(600\) km and an inclination of approximately \(100^\circ\).
+
+
+\subsection{Mission Requirements and Objectives}
+Throughout the mission, ARGUS shall:
+\begin{enumerate}
+    \item Detumble at a residual body rate of < 10 deg/s.
+    \item Achieve spin-stabilization < 15 deg of the major inertia axis while spinning < 10 deg/s while pointing within < 10 deg of the Sun direction.
+    \item Acquire and process imagery of the Earth.
+    \item Process images through onboard vision models.
+    \item Cross-validate the position against GPS to within 50 km, and attitude to within 15 deg.
+    \item Downlink telemetry and Payload data.
+\end{enumerate}
+
+\subsection{Mission Timeline}
+At a high level, ARGUS will operate as a state-machine.
+
+\begin{enumerate}
+    \item Launch and deployment.
+    \item Detumbling.
+    \item If spin-rate > threshold || Sun-vector axis > 10 deg nominal -> Spin-Stabilization.
+    \item If batteries > minimum threshold -> Nominal operations, image collection, model inference, and orbit determination.
+    \item If batters < minimum threshold -> Disable all non-essential components and recharge batteries.
+\end{enumerate}
+
+\subsection{Mechanical Structure}
+For the purposes of this report, ARGUS is modeled as a uniformly dense 1U cube with four deployable panels. The geometry of the main chassis and the deployed panels are included to capture the effect of the panels on the spacecraft mass properties, inertia matrix, and environmental torque model.
+
+\subsection{Sensors}
+The sensor suite consists of a 9-axis Bosch BMX160 IMU, a SkyTraq S1216F8-GL GNSS receiver, nine photodiodes, and four 4K Raspberry Pi Module 3 cameras with a $75^\circ$ field of view. The magnetometer measurements and gyroscope measurements will be used for detumbling, with the gyroscope measurements also being used for orbit determination. The GNSS receiver will provide timing and a positional baseline to compare against. The sun sensors will be used for sun-pointing. Finally, the cameras will be used to take roughly nadir pointing photos of Earth's surface for inference and orbit determination.
+
+\subsection{Actuators}
+The attitude control system consists of six magnetorquers arranged in each of the six faces of the main body. These are used for initial detumbling and control.
+
+% \newpage  % removed to avoid forcing the configuration listing onto its own page
+
+\newpage
+\section{Spacecraft Model}
+
+\subsection{ARGUS Model}
+ARGUS is modeled as a collection a main, uniform-density cube and $4$ rigid components defined in the configuration file. For each component $i$, the configuration specifies a mass $m_i$, a geometric center $\mathbf{r}_i \in \mathbb{R}^3$, and a set of exposed faces with dimensions and outward normals.
+
+\subsection{Discretization \& Configuration File}
+The spacecraft model, initial conditions, and simulation settings are defined in a YAML configuration file. The approximate model and config file (units are in SI) are shown below.
+
+\begin{figure}[ht]
+  \centering
+  \begin{minipage}[t]{0.49\linewidth}
+    \centering
+    \includegraphics[width=0.6\linewidth]{\detokenize{ARGUS Satellite Images/Core.png}}\\
+    {\footnotesize Main Body $\approx$ Cube}
+  \end{minipage}
+  \begin{minipage}[t]{0.49\linewidth}
+    \centering
+    \includegraphics[width=0.3\linewidth]{\detokenize{ARGUS Satellite Images/Deployable.png}}\\
+    {\footnotesize Deployable Panel $\approx$ Thin Rectangular Prism}
+  \end{minipage}
+  \caption{Two major discretized components used to define the spacecraft model.}
+  \label{fig:argus-config-geometry}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}[t]{0.32\linewidth}
+  \begin{lstlisting}[language={},basicstyle=\ttfamily\tiny,frame=single]
+physical_properties:
+
+  - name: main_body
+    dimensions:
+      x: 0.1
+      y: 0.1
+      z: 0.1
+    faces:
+      face_dimensions:
+        x+: [0.1, 0.1]
+        x-: [0.1, 0.1]
+        y+: [0.1, 0.1]
+        y-: [0.1, 0.1]
+        z+: [0.1, 0.1]
+        z-: [0.1, 0.1]
+      face_normals:
+        x+: [1.0, 0.0, 0.0]
+        x-: [-1.0, 0.0, 0.0]
+        y+: [0.0, 1.0, 0.0]
+        y-: [0.0, -1.0, 0.0]
+        z+: [0.0, 0.0, 1.0]
+        z-: [0.0, 0.0, -1.0]
+    geometric_center:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    mass: 1.15
+    mass_deviation: 0.05
+  \end{lstlisting}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.32\linewidth}
+  \begin{lstlisting}[language={},basicstyle=\ttfamily\tiny,frame=single]
+
+
+  - name: x+_deployable
+    dimensions:
+      x: 0.1
+      y: 0.082
+      z: 0.00385
+    faces:
+      face_dimensions:
+        z+: [0.1, 0.082]
+        z-: [0.1, 0.082]
+      face_normals:
+        z+: [1.0, 0.0, 0.0]
+        z-: [-1.0, 0.0, 0.0]
+    geometric_center:
+      x: 0.1
+      y: 0.0
+      z: 0.498075
+    normal_vector:
+      x: 1.0
+      y: 0.0
+      z: 0.0
+    mass: 0.03507
+    mass_deviation: 0.01
+    
+  - name: x-_deployable
+    dimensions:
+      x: 0.1
+      y: 0.082
+      z: 0.00385
+    faces:
+      face_dimensions:
+        z+: [0.1, 0.082]
+        z-: [0.1, 0.082]
+      face_normals:
+        z+: [1.0, 0.0, 0.0]
+        z-: [-1.0, 0.0, 0.0]
+    geometric_center:
+      x: -0.1
+      y: 0.0
+      z: 0.498075
+    normal_vector:
+      x: -1.0
+      y: 0.0
+      z: 0.0
+    mass: 0.03507
+    mass_deviation: 0.01
+    
+  \end{lstlisting}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.32\linewidth}
+  \begin{lstlisting}[language={},basicstyle=\ttfamily\tiny,frame=single]
+
+
+  - name: y+_deployable
+    dimensions:
+      x: 0.082
+      y: 0.1
+      z: 0.00385
+    faces:
+      face_dimensions:
+        z+: [0.082, 0.1]
+        z-: [0.082, 0.1]
+      face_normals:
+        z+: [0.0, 1.0, 0.0]
+        z-: [0.0, -1.0, 0.0]
+    geometric_center:
+      x: 0.0
+      y: 0.1
+      z: 0.498075
+    normal_vector:
+      x: 0.0
+      y: 1.0
+      z: 0.0
+    mass: 0.03507
+    mass_deviation: 0.01
+
+  - name: y-_deployable
+    dimensions:
+      x: 0.082
+      y: 0.1
+      z: 0.00385
+    faces:
+      face_dimensions:
+        z+: [0.082, 0.1]
+        z-: [0.082, 0.1]
+      face_normals:
+        z+: [0.0, 1.0, 0.0]
+        z-: [0.0, -1.0, 0.0]
+    geometric_center:
+      x: 0.0
+      y: -0.1
+      z: 0.498075
+    normal_vector:
+      x: 0.0
+      y: -1.0
+      z: 0.0
+    mass: 0.03507
+    mass_deviation: 0.01
+  \end{lstlisting}
+  \end{minipage}
+
+  \caption{Current YAML configuration for the ARGUS model.}
+  \label{fig:argus-yaml-config}
+\end{figure}
+
+\subsection{Moment of Inertia}
+ARGUS's total mass is the sum of the main body and four deployables:
+\begin{equation}
+M = \sum_{i=1}^{N} m_i .
+\end{equation}
+
+The center of mass is determined by:
+\begin{equation}
+\mathbf{r}_{\mathrm{C.o.M.}} = \frac{1}{M}\sum_{i=1}^{N} m_i \mathbf{r}_i 
+\end{equation}
+
+Finally, the inertia tensor is given by:
+\begin{equation}
+\mathbf{J_{\mathrm{local}}} = \sum_{i=1}^{N} m_i \left( \mathbf{r}_i^T \mathbf{r}_i \mathbf{I} - \mathbf{r}_i \mathbf{r}_i^T \right)
+\end{equation}
+
+In the methodology used to configure ARGUS in the simulator, the dimensions and position vectors from the origin to the center of mass of each component are used. Thus, it is required to take the extra step to compose the inertias. 
+\begin{equation}
+\boldsymbol{r}' = \mathbf{r}_i - \mathbf{r}_{\mathrm{C.o.M.}}
+\end{equation}
+and compute
+\begin{equation}
+\mathbf{J}_{\mathrm{C.o.M.}} = \sum_{i=1}^{N} m_i \left( \|\boldsymbol{r}'\|^2 \mathbf{I} - \boldsymbol{r}' \boldsymbol{r}_i'^T \right)
+\label{eq:Jcom}
+\end{equation}
+
+For brevity, $\mathbf{J}_{\mathrm{C.o.M.}}$ will be simplified as $\mathbf{J}$.
+
+\begin{quote}
+\textbf{Note:} Under ideal modeling assumptions, ARGUS is completely symmetric about the $z$-axis. To make perturbations (and the later momentum-sphere trajectories) visible, a small mass deviation is intentionally introduced; this can be seen in the configuration file.
+\end{quote}
+
+The following moment of inertia matrices were calculated for the five main discretized components:
+
+\noindent
+\begingroup
+\tiny
+\setlength{\abovedisplayskip}{4pt}
+\setlength{\belowdisplayskip}{4pt}
+\setlength{\abovedisplayshortskip}{4pt}
+\setlength{\belowdisplayshortskip}{4pt}
+\setlength{\arraycolsep}{3pt}
+\renewcommand{\arraystretch}{0.95}
+
+\begin{equation}
+\mathbf{J}_{\text{main body}} =
+\begin{bmatrix}
+5.77\times10^{-3} & 5.49\times10^{-7} & -3.37\times10^{-5} \\
+5.49\times10^{-7} & 5.77\times10^{-3} & 6.27\times10^{-5} \\
+-3.37\times10^{-5} & 6.27\times10^{-5} & 1.92\times10^{-3}
+\end{bmatrix}
+\quad [\mathrm{kg\,m^2}]
+\end{equation}
+
+
+\begin{minipage}[t]{0.48\textwidth}
+\[
+\begin{aligned}[t]
+\mathbf{J}_{x+,\text{deployable}} &=
+\begin{bmatrix}
+9.01\times10^{-3} & -4.34\times10^{-6} & -2.03\times10^{-3} \\
+-4.34\times10^{-6} & 9.48\times10^{-3} & -1.92\times10^{-5} \\
+-2.03\times10^{-3} & -1.92\times10^{-5} & 5.23\times10^{-4}
+\end{bmatrix}
+\\[0.8em]
+\mathbf{J}_{x-,\text{deployable}} &=
+\begin{bmatrix}
+7.73\times10^{-3} & 3.76\times10^{-6} & 1.76\times10^{-3} \\
+3.76\times10^{-6} & 8.14\times10^{-3} & -1.65\times10^{-5} \\
+1.76\times10^{-3} & -1.65\times10^{-5} & 4.57\times10^{-4}
+\end{bmatrix}
+\end{aligned}
+\]
+\centering
+{\tiny $[\mathrm{kg\,m^2}]$}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\[
+\begin{aligned}[t]
+\mathbf{J}_{y+,\text{deployable}} &=
+\begin{bmatrix}
+5.42\times10^{-3} & 1.35\times10^{-6} & 5.90\times10^{-6} \\
+1.35\times10^{-6} & 5.15\times10^{-3} & -1.18\times10^{-3} \\
+5.90\times10^{-6} & -1.18\times10^{-3} & 3.07\times10^{-4}
+\end{bmatrix}
+\\[0.8em]
+\mathbf{J}_{y-,\text{deployable}} &=
+\begin{bmatrix}
+7.93\times10^{-3} & -1.94\times10^{-6} & 8.63\times10^{-6} \\
+-1.94\times10^{-6} & 7.54\times10^{-3} & 1.69\times10^{-3} \\
+8.63\times10^{-6} & 1.69\times10^{-3} & 4.34\times10^{-4}
+\end{bmatrix}
+\end{aligned}
+\]
+\centering
+{\tiny $[\mathrm{kg\,m^2}]$}
+\end{minipage}
+\endgroup
+
+\vspace{1em}
+
+Using equation \eqref{eq:Jcom}, the total moment of inertia of ARGUS is calculated to be:
+
+\begin{equation}
+\mathbf{J}_{\text{spacecraft}} =
+\begin{bmatrix}
+3.59\times10^{-2} & -6.21\times10^{-7} & -2.90\times10^{-4} \\
+-6.21\times10^{-7} & 3.61\times10^{-2} & 5.41\times10^{-4} \\
+-2.90\times10^{-4} & 5.41\times10^{-4} & 3.64\times10^{-3}
+\end{bmatrix}
+\quad [\mathrm{kg\,m^2}]
+\end{equation}
+
+\begin{equation}
+\mathbf{J}_{\text{principal}} =
+\begin{bmatrix}
+3.63\times10^{-3} & 0 & 0 \\
+0 & 3.59\times10^{-2} & 0 \\
+0 & 0 & 3.61\times10^{-2}
+\end{bmatrix}
+\quad [\mathrm{kg\,m^2}]
+\end{equation}
+
+\begin{equation}
+\mathbf{{}^{N}R^{B}}=
+\begin{bmatrix}
+9.01\times10^{-3} & -1.67\times10^{-2} & 1.00 \\
+1.00 & 2.48\times10^{-2} & -8.60\times10^{-3} \\
+2.46\times10^{-2} & -1.00 & -1.69\times10^{-2}
+\end{bmatrix}
+\end{equation}
+
+\vspace{1em}
+
+\begin{equation}
+\mathbf{J}_{\text{spacecraft}} =
+\begin{bmatrix}
+3.586173\times10^{-2} & -6.210061\times10^{-7} & -2.904824\times10^{-4} \\
+-6.210061\times10^{-7} & 3.607677\times10^{-2} & 5.407120\times10^{-4} \\
+-2.904824\times10^{-4} & 5.407120\times10^{-4} & 3.644793\times10^{-3}
+\end{bmatrix}
+\quad [\mathrm{kg\,m^2}]
+\end{equation}
+
+\subsection{Principal Axes}
+The principal axes are the eigenvectors of the inertia tensor, i.e.
+\begin{equation}
+\mathbf{J}\mathbf{e}_i = \lambda_i \mathbf{e}_i
+\end{equation}
+where the eigenvalues $\lambda_i$ are the principal moments of inertia. In this report, the moments are ordered:
+\begin{equation}
+J_{1,1} \le J_{2,2} \le J_{3,3}
+\end{equation}
+so that Axis 1 is the minor axis, Axis 2 is the intermediate axis, and Axis 3 is the major axis.
+
+\subsection{Surface Discretization}
+Each exposed face is represented by a centroid, an outward unit normal, and an area. This is simple enough for ARGUS since each face can be closely approximated as a rectangle. 
+
+The configuration file stores the face normals $\mathbf{n}_{ij}$ and geometric data needed for future use.
+
+\newpage
+\section{Dynamics}
+
+\subsection{System State}
+The full spacecraft state is:
+\begin{equation}
+\mathbf{x} =
+\begin{bmatrix}
+\mathbf{r} \\ \mathbf{\dot{r}} \\ \mathbf{q} \\ \boldsymbol{\omega}
+\end{bmatrix}
+\in \mathbb{R}^{13}
+\end{equation}
+where $\mathbf{r}$ is position, $\mathbf{\dot{r}}$ is velocity, $\mathbf{q} = [q_0\ q_1\ q_2\ q_3]^T$ is a scalar-first quaternion, and $\boldsymbol{\omega} = [\omega_x\ \omega_y\ \omega_z]^T$ is the body angular velocity.
+
+\subsection{Initialization from Orbital Elements}
+
+The initial state $\mathbf{r}$ and $\mathbf{\dot{r}}$ is constructed from the orbital elements $(a,e,i,\Omega,\omega,\nu)$ using the methods in \cite{markley2014fundamentals}.
+\begin{equation}
+p = a(1-e^2),
+\end{equation}
+the perifocal position
+\begin{equation}
+r = \frac{p}{1+e\cos\nu},
+\qquad
+\mathbf{r}_{PQW} =
+\begin{bmatrix}
+r\cos\nu \\ r\sin\nu \\ 0
+\end{bmatrix},
+\end{equation}
+and the perifocal velocity
+\begin{equation}
+\mathbf{v}_{PQW} = \sqrt{\frac{\mu}{p}}
+\begin{bmatrix}
+-\sin\nu \\ e+\cos\nu \\ 0
+\end{bmatrix}.
+\end{equation}
+These vectors are rotated into the inertial reference by the following rotation matrix:
+\begin{equation}
+\mathbf{R} =
+\begin{bmatrix}
+\cos\Omega \cos\omega - \sin\Omega \sin\omega \cos i &
+-\cos\Omega \sin\omega - \sin\Omega \cos\omega \cos i &
+\sin\Omega \sin i \\[6pt]
+\sin\Omega \cos\omega + \cos\Omega \sin\omega \cos i &
+-\sin\Omega \sin\omega + \cos\Omega \cos\omega \cos i &
+-\cos\Omega \sin i \\[6pt]
+\sin\omega \sin i &
+\cos\omega \sin i &
+\cos i
+\end{bmatrix}
+\end{equation}
+\vspace{0.5\baselineskip}
+
+\subsection{Orbital Dynamics}
+The translational dynamics are modeled by spherical acceleration plus a $J_2$ perturbation \cite{markley2014fundamentals}: 
+\begin{equation}
+\dot{\mathbf{r}} = \mathbf{v},
+\end{equation}
+\begin{equation}
+\ddot{\mathbf{r}} = \dot{\mathbf{v}} = \mathbf{a}_g(\mathbf{r}) = -\frac{\mu}{\|\mathbf{r}\|^3}\mathbf{r} + \mathbf{a}_{J_2}(\mathbf{r}),
+\end{equation}
+where the $J_2$ perturbation is
+\begin{equation}
+\mathbf{a}_{J_2} =
+\frac{3}{2}\frac{J_2 \mu R_E^2}{\|\mathbf{r}\|^5}
+\begin{bmatrix}
+x\left(5\frac{z^2}{\|\mathbf{r}\|^2}-1\right) \\
+y\left(5\frac{z^2}{\|\mathbf{r}\|^2}-1\right) \\
+z\left(5\frac{z^2}{\|\mathbf{r}\|^2}-3\right)
+\end{bmatrix}.
+\end{equation}
+
+\subsection{Quaternion Kinematics}
+The attitude kinematics are written using quaternions:
+\begin{equation}
+\mathbf{\dot{q}} = \frac{1}{2}\mathbf{G(q)}\boldsymbol{\omega},
+\end{equation}
+Where $\mathbf{G(q)}$ is the attitude quaternion:
+
+\begin{equation}
+\mathbf{\dot{q}}
+=
+\begin{bmatrix}
+\cos(\theta/2) & -\sin(\theta/2) \\
+\sin(\theta/2) & \cos(\theta/2)
+\end{bmatrix}
+\begin{bmatrix}
+0 \\
+1
+\end{bmatrix}
+\tfrac{1}{2}\omega
+=
+\frac{1}{2} \mathbf{L(q)\,H\,\omega}
+\end{equation}
+
+\subsection{Numerical Integration}
+The state is propagated with RK4:
+\begin{equation}
+\mathbf{x}_{k+1} = \mathbf{x}_k + \frac{\Delta t}{6}
+\left( \mathbf{k}_1 + 2\mathbf{k}_2 + 2\mathbf{k}_3 + \mathbf{k}_4 \right),
+\end{equation}
+with the quaternion being normalized after each iteration $\|\mathbf{q}\|=1$.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.5\linewidth]{\detokenize{ARGUS Satellite Images/simulation_trajectory.png}}
+  \caption{Orbit trajectory from the dynamics simulation. The simulation was run for 580000 seconds ($\sim$100 orbits).}
+  \label{fig:orbit-trajectory}
+\end{figure}
+
+\newpage
+\section{Euler's Equation}
+
+\subsection{Rigid-Body Attitude Dynamics}
+The dynamics for $\dot{\omega}$ are given with Euler's equation in the body frame without external torque:
+\begin{equation}
+\mathbf{J}\dot{\boldsymbol{\omega}} + \boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega}) = \mathbf{0}.
+\end{equation}
+Which is equivalent to:
+\begin{equation}
+\dot{\boldsymbol{\omega}} = -\mathbf{J}^{-1}\left(\boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega})\right).
+\end{equation}
+
+\subsection{Angular Momentum and Momentum Sphere}
+The body angular momentum is
+\begin{equation}
+\mathbf{h} = \mathbf{J}\boldsymbol{\omega}.
+\end{equation}
+To visualize the momentum sphere, the normalized momentum vector is plotted:
+\begin{equation}
+\hat{\mathbf{h}} = \frac{\mathbf{h}}{\|\mathbf{h}\|}.
+\end{equation}
+The equilibrium points correspond to rotation about the principal axes, i.e., directions aligned with the eigenvectors of $\mathbf{J}$.
+
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/simulation_plot_100_q.png}}
+    \caption{100 Second simulation plotted with quaternion attitude.}
+    \label{fig:sim-100-q}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/simulation_plot_100_e.png}}
+    \caption{100 Second simulation plotted with euler-angle attitude.}
+    \label{fig:sim-100-e}
+  \end{subfigure}
+  \caption{Attitude history plots from the nominal dynamics simulation.}
+  \label{fig:sim-100-attitude}
+\end{figure}
+
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere_1.png}}
+    \caption{Rotation about inertial axis 1.}
+    \label{fig:momentum-sphere-axis1}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere_2.png}}
+    \caption{Rotation about inertial axis 2.}
+    \label{fig:momentum-sphere-axis2}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere_3.png}}
+    \caption{Rotation about inertial axis 3.}
+    \label{fig:momentum-sphere-axis3}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere.png}}
+    \caption{Control (reference) momentum sphere (no perturbation, ideal model assumptions).}
+    \label{fig:momentum-sphere-control}
+  \end{subfigure}
+
+  \caption{Momentum-sphere trajectories for rotation about each inertial axis, plus the control (reference) case.}
+  \label{fig:momentum-spheres}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\linewidth]{\detokenize{ARGUS Satellite Images/monte_carlo_components.png}}
+  \caption{25 simulated runs deviated orbital inclinations and initial angular velocities.}
+  \label{fig:monte-carlo-components-inclination-omega}
+\end{figure}
+
+
+\clearpage
+% --- References ---
+\nocite{*}
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
