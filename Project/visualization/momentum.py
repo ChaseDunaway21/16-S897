@@ -45,8 +45,9 @@ def plot_momentum_sphere(
     nonzero_magnitudes = h_magnitude[h_magnitude > 0.0]
     reference_h_magnitude = float(np.mean(nonzero_magnitudes)) if nonzero_magnitudes.size else 1.0
 
-    u = np.linspace(-np.pi, np.pi, 100)
-    v = np.linspace(0, np.pi, 100)
+    surface_resolution = 240
+    u = np.linspace(-np.pi, np.pi, 1000)
+    v = np.linspace(0, np.pi, 1000)
     U, V = np.meshgrid(u, v)
 
     # The factor 0.95 plots the path floating above the sphere slightly
@@ -77,6 +78,8 @@ def plot_momentum_sphere(
         y,
         z,
         facecolors=sphere_facecolors,
+        rcount=surface_resolution,
+        ccount=surface_resolution,
         shade=False,
         edgecolor="none",
         antialiased=True,
