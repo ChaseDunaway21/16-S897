@@ -2,7 +2,7 @@ simulation_properties:
 
   - name: monte_carlo
     value: False
-    trials: 20
+    trials: 25
 
   - name: ideal # this only applies to non-monte carlo simulations, monte carlo will include deviations and perturbations
     value: False
@@ -96,7 +96,7 @@ physical_properties:
     geometric_center:
       x: 0.1 # m
       y: 0.0 # m
-      z: 0.498075 # m
+      z: -0.498075 # m
     normal_vector: 
       x: 1.0
       y: 0.0
@@ -119,7 +119,7 @@ physical_properties:
     geometric_center:
       x: -0.1 # m
       y: 0.0 # m
-      z: 0.498075 # m
+      z: -0.498075 # m
     normal_vector: 
       x: -1.0
       y: 0.0
@@ -142,7 +142,7 @@ physical_properties:
     geometric_center:
       x: 0.0 # m
       y: 0.1 # m
-      z: 0.498075 # m
+      z: -0.498075 # m
     normal_vector: 
       x: 0.0
       y: 1.0
@@ -165,7 +165,7 @@ physical_properties:
     geometric_center:
       x: 0.0 # m
       y: -0.1 # m
-      z: 0.498075 # m
+      z: -0.498075 # m
     normal_vector: 
       x: 0.0
       y: -1.0
