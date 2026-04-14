@@ -333,11 +333,21 @@ class Spacecraft:
             inertia_tensor += component_inertia
 
         self.inertia_tensor = inertia_tensor
-        for name, component_inertia in component_inertias:
-            print(f"{name} inertia contribution [kg m^2]:")
-            print(np.array2string(component_inertia, precision=6, separator=", "))
-        print("Spacecraft inertia tensor [kg m^2]:")
-        print(np.array2string(self.inertia_tensor, precision=6, separator=", "))
+        if self.debug:
+            principal_moments, principal_axes = np.linalg.eigh(self.inertia_tensor)
+            body_to_principal = principal_axes.T
+
+            for name, component_inertia in component_inertias:
+                print(f"{name} inertia contribution [kg m^2]:")
+                print(np.array2string(component_inertia, precision=6, separator=", "))
+            print("Spacecraft inertia tensor [kg m^2]:")
+            print(np.array2string(self.inertia_tensor, precision=6, separator=", "))
+            print("Principal moments [kg m^2]:")
+            print(np.array2string(principal_moments, precision=6, separator=", "))
+            print("Principal-to-body rotation matrix R_B_P [-]:")
+            print(np.array2string(principal_axes, precision=6, separator=", "))
+            print("Body-to-principal rotation matrix R_P_B [-]:")
+            print(np.array2string(body_to_principal, precision=6, separator=", "))
 
         return self.inertia_tensor
         

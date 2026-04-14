@@ -77,7 +77,7 @@ def plot_monte_carlo_component_overlay(
     ax.set_title(title)
     ax.set_xlabel("time [s]")
     ax.set_ylabel(ylabel)
-    ax.legend(loc="best")
+    ax.legend(loc="upper right")
     fig.tight_layout()
     return fig
 
@@ -126,7 +126,7 @@ def plot_monte_carlo_overview(
                     )
             ax.set_ylabel(ylabel)
             ax.set_title(title)
-            ax.legend(loc="best")
+            ax.legend(loc="upper right")
             axis_index += 1
             continue
 

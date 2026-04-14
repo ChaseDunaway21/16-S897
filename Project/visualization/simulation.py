@@ -131,7 +131,7 @@ def plot_earth_sphere(ax: plt.Axes) -> None:
         y,
         z,
         color="#2563eb",
-        alpha=0.12,
+        alpha=1.00,
         edgecolor="none",
         antialiased=True,
         shade=True,
@@ -143,14 +143,15 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     fig = plt.figure(figsize=(10, 9), facecolor=FIGURE_FACE_COLOR)
     ax = fig.add_subplot(1, 1, 1, projection="3d")
     ax.set_facecolor(AXIS_FACE_COLOR)
-    plot_earth_sphere(ax)
-    ax.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=1.4, color="#0f766e", alpha=0.95)
+    # plot_earth_sphere(ax)
+    ax.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=1.4, color="#FF781F", alpha=1.00)
     ax.scatter(
         pos_km[0, 0],
         pos_km[0, 1],
         pos_km[0, 2],
-        color="#19a04b",
+        color="#25d32e",
         edgecolors="white",
+        alpha=0.6,
         linewidths=0.8,
         s=55,
         label="start",
@@ -160,8 +161,9 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
         pos_km[-1, 0],
         pos_km[-1, 1],
         pos_km[-1, 2],
-        color="#e12121",
+        color="#f33d3d",
         edgecolors="white",
+        alpha=0.6,
         linewidths=0.8,
         s=55,
         label="end",
@@ -171,7 +173,7 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
     ax.set_zlabel("z [km]")
-    ax.legend(loc="best")
+    ax.legend(loc="upper right")
     set_equal_orbit_axes(ax, orbit_extent_points(pos_km))
     fig.tight_layout()
     return fig
@@ -280,8 +282,8 @@ def plot_simulation_overview(
 
     ax_orbit = fig.add_subplot(gs[0, 0], projection="3d")
     ax_orbit.set_facecolor(AXIS_FACE_COLOR)
-    plot_earth_sphere(ax_orbit)
-    ax_orbit.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#0f766e", alpha=0.95)
+    # plot_earth_sphere(ax_orbit)
+    ax_orbit.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#FF781F", alpha=0.95)
     ax_orbit.scatter(
         pos_km[0, 0],
         pos_km[0, 1],
@@ -331,7 +333,7 @@ def plot_simulation_overview(
             ax_att.plot(times, att_values[:, i], linewidth=1.5, color=att_colors[i], label=att_labels[i])
         ax_att.set_title(str(attitude_spec["title"]))
         ax_att.set_ylabel(angle_ylabel)
-        ax_att.legend(loc="best")
+        ax_att.legend(loc="upper right")
         ax_att.tick_params(labelbottom=False)
 
         ax_omega = fig.add_subplot(component_gs[1, 0])
@@ -347,7 +349,7 @@ def plot_simulation_overview(
         ax_omega.set_title("Angular Velocity Components")
         ax_omega.set_xlabel("time [s]")
         ax_omega.set_ylabel("angular velocity [rad/s]")
-        ax_omega.legend(loc="best")
+        ax_omega.legend(loc="upper right")
     else:
         total_rows = att_values.shape[1] + att_rate.shape[1]
         component_gs = gs[1, :].subgridspec(total_rows, 1, hspace=0.22)
