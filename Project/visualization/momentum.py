@@ -31,7 +31,7 @@ def plot_momentum_sphere(
 
     history = np.asarray(result["state_history_si"], dtype=float)
     w = history[:, ctx.idx["ATTITUDE_RATE"]]
-    inertia_tensor = ctx.spacecraft.compute_inertia_tensor()
+    inertia_tensor = ctx.spacecraft.inertia_tensor
 
     h_body = (inertia_tensor @ w.T).T
     h_norm = np.linalg.norm(h_body, axis=1, keepdims=True)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math import skew_symmetric
+from world.math import attitude_jacobian, skew_symmetric
 import world.models.gravity as gravity
 
 def f(
@@ -47,15 +47,8 @@ def attitude_dynamics(
     q = state[attitude_slice]
     w = state[attitude_rate_slice]
 
-    # Scalar-first quaternion kinematics
-    q_scalar = q[0]
-    q_vector = q[1:4]
-
-    # This is the same as the in-class lecture notes, but made to run efficiently with numpy
-    qdot_scalar = -0.5 * float(np.dot(q_vector, w))
-    qdot_vector = 0.5 * (q_scalar * w + np.cross(q_vector, w))
-    qdot = np.hstack((qdot_scalar, qdot_vector))
-    wdot = np.linalg.solve(inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w))
+    qdot = 0.5 * attitude_jacobian(q) @ w # Attitude Jacobian from Notes
+    wdot = np.linalg.solve(inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w)) # Euler's Equation from Notes
 
     state_dot[attitude_slice] = qdot
     state_dot[attitude_rate_slice] = wdot
@@ -92,7 +85,7 @@ def integrate_dynamics(
 
     state = spacecraft.get_state().astype(float, copy=True)
     state_index = spacecraft.Idx["X"]
-    inertia_tensor = spacecraft.compute_inertia_tensor()
+    inertia_tensor = spacecraft.inertia_tensor
 
     if derivative_fn is None:
         derivative_fn = lambda x, t, h: f(x, state_index, t, h, inertia_tensor)

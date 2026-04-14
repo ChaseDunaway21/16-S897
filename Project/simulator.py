@@ -6,6 +6,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
 import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable
@@ -32,7 +33,7 @@ def _run_single_monte_carlo_trial(
     """Run one Monte Carlo trial in an isolated output directory."""
     run_dir = Path(output_dir)
     sim = Simulator(config_path=Path(config_path), output_dir=run_dir)
-    result = sim.run()
+    result = sim.run(show_progress=False)
     state_file = run_dir / "state_history.npz"
     np.savez_compressed(
         state_file,
@@ -295,7 +296,28 @@ class Simulator:
         self.logger.info("  attitude [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE"]]))
         self.logger.info("  omega [rad/s]: %s", self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]))
 
-    def run(self) -> dict[str, np.ndarray | float | int]:
+    @staticmethod
+    def _progress_fraction(current: int, total: int) -> float:
+        if total <= 0:
+            return 1.0
+        return min(max(current / total, 0.0), 1.0)
+
+    @classmethod
+    def _progress_line(cls, label: str, current: int, total: int, unit: str, width: int = 28) -> str:
+        fraction = cls._progress_fraction(current, total)
+        filled = int(width * fraction)
+        bar = "#" * filled + "-" * (width - filled)
+        return f"{label:<11} [{bar}] {current}/{total} {unit} ({100.0 * fraction:5.1f}%)"
+
+    @classmethod
+    def _print_progress(cls, label: str, current: int, total: int, unit: str) -> None:
+        line = cls._progress_line(label, current, total, unit)
+        sys.stdout.write(f"\r{line}")
+        if current >= total:
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    def run(self, show_progress: bool = True) -> dict[str, np.ndarray | float | int]:
         state = self.spacecraft.get_state().astype(float, copy=True)
 
         orbit_period = self._orbit_period_seconds(state[self.idx["POS_ECI"]])
@@ -314,6 +336,9 @@ class Simulator:
         history = np.zeros((num_steps + 1, state.size), dtype=float)
         history[0] = state
 
+        if show_progress:
+            self._print_progress("Simulation", 0, num_steps, "steps")
+
         t = 0.0
         for k in range(1, num_steps + 1):
             state = integrate_dynamics(
@@ -325,6 +350,9 @@ class Simulator:
             t += self.dt
             times[k] = t
             history[k] = state
+
+            if show_progress:
+                self._print_progress("Simulation", k, num_steps, "steps")
 
             if self.log_interval_steps > 0 and (k % self.log_interval_steps == 0 or k == num_steps):
                 self._log_state_components("Progress", state, step=k, total_steps=num_steps, time_s=t)
@@ -357,6 +385,7 @@ class Simulator:
         max_workers: int | None = None,
         seed: int | None = None,
         save_plots: bool = False,
+        show_progress: bool = True,
     ) -> dict[str, object]:
         """Run Monte Carlo trials in parallel and store each trial in its own folder."""
         sim_props = self.cfg.get("simulation_properties", []) or []
@@ -392,14 +421,24 @@ class Simulator:
         max_workers = max(1, int(max_workers))
 
         summaries: list[dict[str, object]] = []
+        completed_trials = 0
+        if show_progress:
+            self._print_progress("Monte Carlo", completed_trials, total_trials, "trials")
+
         if max_workers == 1:
             for job in trial_jobs:
                 summaries.append(_run_single_monte_carlo_trial(*job))
+                completed_trials += 1
+                if show_progress:
+                    self._print_progress("Monte Carlo", completed_trials, total_trials, "trials")
         else:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 futures = [executor.submit(_run_single_monte_carlo_trial, *job) for job in trial_jobs]
                 for future in as_completed(futures):
                     summaries.append(future.result())
+                    completed_trials += 1
+                    if show_progress:
+                        self._print_progress("Monte Carlo", completed_trials, total_trials, "trials")
 
         summaries.sort(key=lambda item: str(item.get("output_dir", "")))
 

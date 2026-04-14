@@ -131,7 +131,7 @@ def plot_earth_sphere(ax: plt.Axes) -> None:
         y,
         z,
         color="#2563eb",
-        alpha=0.20,
+        alpha=0.12,
         edgecolor="none",
         antialiased=True,
         shade=True,
@@ -144,7 +144,7 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     ax = fig.add_subplot(1, 1, 1, projection="3d")
     ax.set_facecolor(AXIS_FACE_COLOR)
     plot_earth_sphere(ax)
-    ax.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#0f766e", alpha=0.95)
+    ax.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=1.4, color="#0f766e", alpha=0.95)
     ax.scatter(
         pos_km[0, 0],
         pos_km[0, 1],

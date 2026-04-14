@@ -14,6 +14,15 @@ def skew_symmetric(v: np.ndarray) -> np.ndarray:
                      [v[2], 0, -v[0]],
                      [-v[1], v[0], 0]])
 
+def attitude_jacobian(q: np.ndarray) -> np.ndarray:
+    """Return G(q) Attitude Jacobian."""
+    q_scalar = q[0]
+    q_vector = q[1:4]
+    return np.vstack((
+        -q_vector[np.newaxis, :],
+        q_scalar * np.eye(3) + skew_symmetric(q_vector),
+    ))
+
 def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
     """Convert a quaternion to a rotation matrix."""
     w, x, y, z = q

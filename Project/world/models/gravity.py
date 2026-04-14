@@ -6,6 +6,10 @@ The model is simply based on a spherical acceleration model.
 "Position" is assumed to be in ECI
 
 Inspiration comes from ARGUS-2's simulation framework
+
+References:
+[1] F. L. Markley and J. L. Crassidis, Fundamentals of Spacecraft Attitude Determination and Control, ser. Space Technology Library. New
+    York, NY: Springer, 2014, vol. 33.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 from world.models.constants import MU_EARTH, J2, RADIUS_EARTH
     
-def acceleration(position: np.ndarray) -> np.ndarray:
+def acceleration(position: np.ndarray) -> np.ndarray:  # Eq 10.85 [1]
     """Compute gravitational acceleration."""
     
     accel = spherical_acceleration(position) + j2_perturbation(position)
@@ -21,7 +25,7 @@ def acceleration(position: np.ndarray) -> np.ndarray:
     return accel
 
 
-def spherical_acceleration(position: np.ndarray) -> np.ndarray:
+def spherical_acceleration(position: np.ndarray) -> np.ndarray: # Eq 10.85 [1]
     """Compute spherical gravity acceleration."""
 
     position = np.asarray(position, dtype=float).reshape(-1)
@@ -37,7 +41,7 @@ def spherical_acceleration(position: np.ndarray) -> np.ndarray:
     return accel
 
 
-def j2_perturbation(position: np.ndarray) -> np.ndarray:
+def j2_perturbation(position: np.ndarray) -> np.ndarray: # Eq 10.103a [1]
     """J2 Perturbation model. Returns a 3x1 column vector."""
 
     accel = np.zeros(3, dtype=float)

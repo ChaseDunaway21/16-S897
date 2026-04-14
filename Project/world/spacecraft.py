@@ -4,7 +4,12 @@ Author: Chase Dunaway
 Spacecraft Object for the ARGUS Satellite
 
 The config.yaml file contains the physical properties of the satellite
+
+References:
+[1] F. L. Markley and J. L. Crassidis, Fundamentals of Spacecraft Attitude Determination and Control, ser. Space Technology Library. New
+    York, NY: Springer, 2014, vol. 33.
 """
+
 
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ class Spacecraft:
         self.config_path = Path(config_path)
 
         self.names: list[str] = []
+        self.debug: bool = False
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
         self.inertia_tensor: np.ndarray = np.zeros((3, 3), dtype=float)
         self.position_vectors: np.ndarray = np.empty((0, 3), dtype=float)
@@ -53,27 +59,8 @@ class Spacecraft:
 
         self.load_config()
 
-    def set_state(self, state: np.ndarray) -> None:
-        """Set the full spacecraft state vector."""
-        if state.ndim != 1 or state.size != self.state_size:
-            raise ValueError(f"state must be a 1D vector with {self.state_size} elements")
-
-        self.state = state.astype(float)
-        self.position_eci = self.state[self.Idx["X"]["POS_ECI"]]
-        self.velocity_eci = self.state[self.Idx["X"]["VEL_ECI"]]
-        self.attitude = self.state[self.Idx["X"]["ATTITUDE"]]
-        self.attitude_rate = self.state[self.Idx["X"]["ATTITUDE_RATE"]]
-
-    def get_state(self) -> np.ndarray:
-        """Return full state vector sized by the model configuration."""
-        self.state[self.Idx["X"]["POS_ECI"]] = self.position_eci
-        self.state[self.Idx["X"]["VEL_ECI"]] = self.velocity_eci
-        self.state[self.Idx["X"]["ATTITUDE"]] = self.attitude
-        self.state[self.Idx["X"]["ATTITUDE_RATE"]] = self.attitude_rate
-        return self.state
-
     @staticmethod
-    def _property_value(items: Iterable[Dict], target_name: str, default: float | int) -> float | int:
+    def _property_value(items: Iterable[Dict], target_name: str, default: object) -> object:
         """Extract a named scalar value from a list of {name, value} property dictionaries."""
         for item in items:
             if str(item.get("name", "")).strip() == target_name:
@@ -81,49 +68,28 @@ class Spacecraft:
         return default
 
     @staticmethod
-    def _state_from_orbital_elements(
-        semi_major_axis_m: float,
-        eccentricity: float,
-        inclination_deg: float,
-        raan_deg: float,
-        argument_of_perigee_deg: float,
-        true_anomaly_deg: float,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Convert classical orbital elements to Cartesian position and velocity."""
-        a = float(semi_major_axis_m)
-        e = float(eccentricity)
-        inc = np.deg2rad(float(inclination_deg))
-        raan = np.deg2rad(float(raan_deg))
-        argp = np.deg2rad(float(argument_of_perigee_deg))
-        nu = np.deg2rad(float(true_anomaly_deg))
+    def _as_bool(value: object, default: bool = False) -> bool:
+        """Normalize config values into booleans."""
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
+                return False
+            return default
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return default
 
-        if e < 0.0 or e >= 1.0:
-            raise ValueError("0 <= e < 1")
+    @classmethod
+    def _property_bool(cls, items: Iterable[Dict], target_name: str, default: bool = False) -> bool:
+        """Extract and normalize a named boolean property."""
+        return cls._as_bool(cls._property_value(items, target_name, default), default)
 
-        p = a * (1.0 - e * e)
-        cos_nu = np.cos(nu)
-        sin_nu = np.sin(nu)
-        r_norm = p / (1.0 + e * cos_nu)
-
-        r_pqw = np.array([r_norm * cos_nu, r_norm * sin_nu, 0.0], dtype=float)
-        v_pqw = np.sqrt(MU_EARTH / p) * np.array([-sin_nu, e + cos_nu, 0.0], dtype=float)
-
-        c_raan, s_raan = np.cos(raan), np.sin(raan)
-        c_inc, s_inc = np.cos(inc), np.sin(inc)
-        c_argp, s_argp = np.cos(argp), np.sin(argp)
-
-        rotation = np.array(
-            [
-                [c_raan * c_argp - s_raan * s_argp * c_inc, -c_raan * s_argp - s_raan * c_argp * c_inc, s_raan * s_inc],
-                [s_raan * c_argp + c_raan * s_argp * c_inc, -s_raan * s_argp + c_raan * c_argp * c_inc, -c_raan * s_inc],
-                [s_argp * s_inc, c_argp * s_inc, c_inc],
-            ],
-            dtype=float,
-        )
-
-        position = rotation @ r_pqw
-        velocity = rotation @ v_pqw
-        return position, velocity
 
     # Bunch of YAML parsing helpers
     @staticmethod
@@ -174,6 +140,13 @@ class Spacecraft:
         """Load physical properties from the spacecraft YAML config file."""
         with self.config_path.open("r", encoding="utf-8") as file:
             cfg = yaml.safe_load(file) or {}
+
+        simulation_properties: Iterable[Dict] = cfg.get("simulation_properties", [])
+        self.debug = self._property_bool(
+            simulation_properties,
+            "debug",
+            default=self._as_bool(cfg.get("debug"), False),
+        )
 
         dynamics_properties: Iterable[Dict] = cfg.get("dynamics_properties", [])
         raw_state_size = self._property_value(dynamics_properties, "state_size", self.BASE_STATE_SIZE)
@@ -252,6 +225,71 @@ class Spacecraft:
         )
         self.face_dimensions = face_dimensions
         self.face_normals = face_normals
+        self.compute_inertia_tensor()
+
+    @staticmethod
+    def _state_from_orbital_elements(
+        semi_major_axis_m: float,
+        eccentricity: float,
+        inclination_deg: float,
+        raan_deg: float,
+        argument_of_perigee_deg: float,
+        true_anomaly_deg: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Convert classical orbital elements to Cartesian position and velocity."""
+        a = float(semi_major_axis_m)
+        e = float(eccentricity)
+        inc = np.deg2rad(float(inclination_deg))
+        raan = np.deg2rad(float(raan_deg))
+        argp = np.deg2rad(float(argument_of_perigee_deg))
+        nu = np.deg2rad(float(true_anomaly_deg))
+
+        if e < 0.0 or e >= 1.0:
+            raise ValueError("0 <= e < 1")
+
+        p = a * (1.0 - e * e) # Eq 10.15 [1]
+        cos_nu = np.cos(nu)
+        sin_nu = np.sin(nu)
+        r_norm = p / (1.0 + e * cos_nu) # Eq 10.21 [1]
+
+        r_pqw = np.array([r_norm * cos_nu, r_norm * sin_nu, 0.0], dtype=float)  # Eq 10.49a [1] (inclination is in R)
+        v_pqw = np.sqrt(MU_EARTH / p) * np.array([-sin_nu, e + cos_nu, 0.0], dtype=float) # Eq 10.49b [1] (inclination is in R)
+
+        c_raan, s_raan = np.cos(raan), np.sin(raan)
+        c_inc, s_inc = np.cos(inc), np.sin(inc)
+        c_argp, s_argp = np.cos(argp), np.sin(argp)
+
+        rotation = np.array(
+            [
+                [c_raan * c_argp - s_raan * s_argp * c_inc, -c_raan * s_argp - s_raan * c_argp * c_inc, s_raan * s_inc],
+                [s_raan * c_argp + c_raan * s_argp * c_inc, -s_raan * s_argp + c_raan * c_argp * c_inc, -c_raan * s_inc],
+                [s_argp * s_inc, c_argp * s_inc, c_inc],
+            ],
+            dtype=float,
+        ) # Eq 10.75 [1]
+
+        position = rotation @ r_pqw
+        velocity = rotation @ v_pqw
+        return position, velocity
+    
+    def set_state(self, state: np.ndarray) -> None:
+        """Set the full spacecraft state vector."""
+        if state.ndim != 1 or state.size != self.state_size:
+            raise ValueError(f"state must be a 1D vector with {self.state_size} elements")
+
+        self.state = state.astype(float)
+        self.position_eci = self.state[self.Idx["X"]["POS_ECI"]]
+        self.velocity_eci = self.state[self.Idx["X"]["VEL_ECI"]]
+        self.attitude = self.state[self.Idx["X"]["ATTITUDE"]]
+        self.attitude_rate = self.state[self.Idx["X"]["ATTITUDE_RATE"]]
+
+    def get_state(self) -> np.ndarray:
+        """Return full state vector sized by the model configuration."""
+        self.state[self.Idx["X"]["POS_ECI"]] = self.position_eci
+        self.state[self.Idx["X"]["VEL_ECI"]] = self.velocity_eci
+        self.state[self.Idx["X"]["ATTITUDE"]] = self.attitude
+        self.state[self.Idx["X"]["ATTITUDE_RATE"]] = self.attitude_rate
+        return self.state
 
     def compute_center_of_mass(self) -> np.ndarray:
         """Compute the spacecraft center of mass from loaded component data."""
@@ -271,8 +309,14 @@ class Spacecraft:
 
         center_of_mass = self.compute_center_of_mass()
         inertia_tensor = np.zeros((3, 3), dtype=float)
+        component_inertias: list[tuple[str, np.ndarray]] = []
 
-        for mass, position, dimensions in zip(self.mass_vector, self.position_vectors, self.dimension_vectors):
+        for name, mass, position, dimensions in zip(
+            self.names,
+            self.mass_vector,
+            self.position_vectors,
+            self.dimension_vectors,
+        ):
             dx, dy, dz = np.asarray(dimensions, dtype=float)
             local_inertia = (float(mass) / 12.0) * np.diag( # Inertia for rectangular prisms
                 [
@@ -284,8 +328,16 @@ class Spacecraft:
 
             r = np.asarray(position, dtype=float) - center_of_mass
             parallel_axis = float(mass) * (np.dot(r, r) * np.eye(3) - np.outer(r, r    ))
-            inertia_tensor += local_inertia + parallel_axis
+            component_inertia = local_inertia + parallel_axis
+            component_inertias.append((name, component_inertia))
+            inertia_tensor += component_inertia
 
         self.inertia_tensor = inertia_tensor
+        for name, component_inertia in component_inertias:
+            print(f"{name} inertia contribution [kg m^2]:")
+            print(np.array2string(component_inertia, precision=6, separator=", "))
+        print("Spacecraft inertia tensor [kg m^2]:")
+        print(np.array2string(self.inertia_tensor, precision=6, separator=", "))
 
         return self.inertia_tensor
+        
