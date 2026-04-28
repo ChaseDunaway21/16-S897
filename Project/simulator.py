@@ -193,7 +193,7 @@ class Simulator:
         seed: int,
         use_nominal_attitude_rate: bool = True,
     ) -> dict:
-        """Create one trial config with sampled initial-condition and mass uncertainties."""
+        """Create one trial config with sampled initial-condition uncertainties."""
         trial_cfg = deepcopy(self.cfg)
         rng = np.random.default_rng(seed + trial_index)
 
@@ -220,27 +220,6 @@ class Simulator:
                         sampled_value = (q / norm_q).tolist()
 
             item["value"] = sampled_value
-
-        physical_properties = trial_cfg.get("physical_properties", []) or []
-        for component in physical_properties:
-            base_mass = component.get("nominal_mass", component.get("mass"))
-            if base_mass is None:
-                continue
-
-            mass_deviation = component.get("mass_deviation")
-            mass_perturbation = component.get("mass_perturbation")
-
-            if mass_deviation is None and mass_perturbation is None and "nominal_mass" not in component:
-                continue
-
-            sampled_mass = self._sample_with_uncertainty(
-                rng,
-                base_mass,
-                mass_deviation,
-                mass_perturbation,
-            )
-            sampled_mass_value = max(0.0, float(sampled_mass))
-            component["mass"] = sampled_mass_value
 
         return trial_cfg
 

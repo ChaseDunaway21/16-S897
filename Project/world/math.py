@@ -7,12 +7,18 @@ Helper math functions for simulation and visualization.
 from __future__ import annotations
 
 import numpy as np
+from scipy.linalg import expm
+
 
 def skew_symmetric(v: np.ndarray) -> np.ndarray:
     """Skew-symmetric matrix for cross product."""
     return np.array([[0, -v[2], v[1]],
                      [v[2], 0, -v[0]],
                      [-v[1], v[0], 0]])
+
+def rotation_vector_exponential(rotation_vector: np.ndarray) -> np.ndarray:
+    """Compute exp(v_hat) for a rotation vector."""
+    return expm(skew_symmetric(rotation_vector))
 
 def attitude_jacobian(q: np.ndarray) -> np.ndarray:
     """Return G(q) Attitude Jacobian."""

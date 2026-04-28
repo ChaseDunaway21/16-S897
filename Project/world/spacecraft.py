@@ -19,6 +19,7 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 
+from world.math import rotation_vector_exponential
 from world.models.constants import MU_EARTH
 
 class Spacecraft:
@@ -32,7 +33,12 @@ class Spacecraft:
 
         self.names: list[str] = []
         self.debug: bool = False
+        self.augment_inertia: bool = False
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
+        self.mass_deviation_fraction: np.ndarray = np.zeros(3, dtype=float)
+        self.rotation_deviation_rad: np.ndarray = np.zeros(3, dtype=float)
+        self.last_inertia_fractional_perturbation: np.ndarray = np.zeros(3, dtype=float)
+        self.last_inertia_rotation_vector: np.ndarray = np.zeros(3, dtype=float)
         self.inertia_tensor: np.ndarray = np.zeros((3, 3), dtype=float)
         self.position_vectors: np.ndarray = np.empty((0, 3), dtype=float)
         self.dimension_vectors: np.ndarray = np.empty((0, 3), dtype=float)
@@ -135,7 +141,7 @@ class Spacecraft:
                 for face_name, face_vector in face_normals.items()
             },
         }
-    
+
     def load_config(self) -> None:
         """Load physical properties from the spacecraft YAML config file."""
         with self.config_path.open("r", encoding="utf-8") as file:
@@ -146,6 +152,21 @@ class Spacecraft:
             simulation_properties,
             "debug",
             default=self._as_bool(cfg.get("debug"), False),
+        )
+
+        inertia_properties: Iterable[Dict] = cfg.get("inertia_properties", [])
+        self.augment_inertia = self._property_bool(
+            inertia_properties,
+            "augment_inertia",
+            default=False,
+        )
+        self.mass_deviation_fraction = np.asarray(
+            self._property_value(inertia_properties, "mass_deviation", [0.0, 0.0, 0.0]),
+            dtype=float,
+        )
+        self.rotation_deviation_rad = np.asarray(
+            self._property_value(inertia_properties, "rotation_deviation", [0.0, 0.0, 0.0]),
+            dtype=float,
         )
 
         dynamics_properties: Iterable[Dict] = cfg.get("dynamics_properties", [])
@@ -225,7 +246,7 @@ class Spacecraft:
         )
         self.face_dimensions = face_dimensions
         self.face_normals = face_normals
-        self.compute_inertia_tensor()
+        self.compute_inertia_tensor(augment=self.augment_inertia)
 
     @staticmethod
     def _state_from_orbital_elements(
@@ -304,9 +325,50 @@ class Spacecraft:
 
         return com
 
-    def compute_inertia_tensor(self) -> np.ndarray:
+    def augment_inertia_tensor(
+        self,
+        nominal_inertia_tensor: np.ndarray,
+        rng: np.random.Generator | None = None,
+    ) -> np.ndarray:
+        """Perturb nominal inertia principal using SVD method in homework 2
+        
+        J = VDV^T
+
+        D_aug = D * (1 + d)
+        V_aug = V * expm(v_hat) (v_hat is skew-symmetric of v)
+        
+        J_aug = V_aug D_aug V_aug^T
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+
+
+        principal_axes, principal_moments, _ = np.linalg.svd(nominal_inertia_tensor)
+
+        # Compute D_aug
+        d = self.mass_deviation_fraction * rng.standard_normal(size=3)
+        
+        augmented_axes = principal_axes @ rotation_perturbation
+        augmented_moments = principal_moments * (1.0 + d)
+        augmented_inertia = augmented_axes @ np.diag(augmented_moments) @ augmented_axes.T
+
+        # Compute V_aug
+        rotation_vector = self.rotation_deviation_rad * rng.standard_normal(size=3)
+        rotation_perturbation = rotation_vector_exponential(rotation_vector)
+
+
+        self.last_inertia_fractional_perturbation = d
+        self.last_inertia_rotation_vector = rotation_vector
+        return 0.5 * (augmented_inertia + augmented_inertia.T)
+
+    def compute_inertia_tensor(
+        self,
+        augment: bool | None = None,
+        rng: np.random.Generator | None = None,
+    ) -> np.ndarray:
         """Compute inertia tensor from loaded component masses and positions."""
 
+        use_augmentation = self.augment_inertia if augment is None else augment
         center_of_mass = self.compute_center_of_mass()
         inertia_tensor = np.zeros((3, 3), dtype=float)
         component_inertias: list[tuple[str, np.ndarray]] = []
@@ -331,6 +393,13 @@ class Spacecraft:
             component_inertia = local_inertia + parallel_axis
             component_inertias.append((name, component_inertia))
             inertia_tensor += component_inertia
+
+        # Homework 2 augmentation for safe mode
+        if use_augmentation:
+            inertia_tensor = self.augment_inertia_tensor(inertia_tensor, rng=rng)
+        else:
+            self.last_inertia_fractional_perturbation = np.zeros(3, dtype=float)
+            self.last_inertia_rotation_vector = np.zeros(3, dtype=float)
 
         self.inertia_tensor = inertia_tensor
         if self.debug:
