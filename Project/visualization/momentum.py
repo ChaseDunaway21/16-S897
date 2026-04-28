@@ -45,7 +45,7 @@ def plot_momentum_sphere(
     nonzero_magnitudes = h_magnitude[h_magnitude > 0.0]
     reference_h_magnitude = float(np.mean(nonzero_magnitudes)) if nonzero_magnitudes.size else 1.0
 
-    surface_resolution = 240
+    surface_resolution = 100
     u = np.linspace(-np.pi, np.pi, 1000)
     v = np.linspace(0, np.pi, 1000)
     U, V = np.meshgrid(u, v)
@@ -92,53 +92,9 @@ def plot_momentum_sphere(
         color="#0f172a",
         alpha=0.95,
     )
-    ax.scatter(
-        momentum_path[0, 0],
-        momentum_path[0, 1],
-        momentum_path[0, 2],
-        color="#f59e0b",
-        s=55,
-        marker="o",
-        edgecolors="white",
-        linewidths=0.9,
-        zorder=6,
-    )
-    ax.scatter(
-        momentum_path[-1, 0],
-        momentum_path[-1, 1],
-        momentum_path[-1, 2],
-        color="#111827",
-        s=55,
-        marker="s",
-        edgecolors="white",
-        linewidths=0.9,
-        zorder=6,
-    )
     axis_colors = ["#dc2626", "#16a34a", "#2563eb"]
     legend_handles = [
         Line2D([0], [0], color="#0f172a", linewidth=2.0, label="Momentum path"),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#f59e0b",
-            markeredgecolor="white",
-            markeredgewidth=0.9,
-            markersize=8,
-            label="Start",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="s",
-            color="w",
-            markerfacecolor="#111827",
-            markeredgecolor="white",
-            markeredgewidth=0.9,
-            markersize=8,
-            label="End",
-        ),
     ]
     for i, (_, color) in enumerate(zip(principal_moments, axis_colors), start=1):
         axis_vec = principal_axes[:, i - 1]
