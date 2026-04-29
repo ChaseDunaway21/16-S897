@@ -2,7 +2,7 @@
 
 from .momentum import plot_momentum_sphere
 from .monte_carlo import plot_monte_carlo_trials
-from .simulation import plot_simulation
+from .simulation_plotter import plot_simulation
 
 __all__ = [
     "plot_momentum_sphere",

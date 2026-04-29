@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .common import FIGURE_FACE_COLOR, save_figure, style_time_axis
-from .simulation import attitude_plot_values
+from .simulation_plotter import attitude_plot_values
 
 
 class MonteCarloPlotContext(Protocol):
@@ -166,6 +166,7 @@ def monte_carlo_plot_paths(
             "velocity": output_root / "monte_carlo_velocity.png",
             "attitude": output_root / f"monte_carlo_attitude_{attitude_plot_suffix}.png",
             "angular_velocity": output_root / "monte_carlo_angular_velocity.png",
+            "rho": output_root / "monte_carlo_rho.png",
         }
 
     base_path = Path(save_path)
@@ -181,6 +182,7 @@ def monte_carlo_plot_paths(
             "velocity": output_root / f"{prefix}_velocity.png",
             "attitude": output_root / f"{prefix}_attitude_{attitude_plot_suffix}.png",
             "angular_velocity": output_root / f"{prefix}_angular_velocity.png",
+            "rho": output_root / f"{prefix}_rho.png",
         }
 
     return {
@@ -188,6 +190,7 @@ def monte_carlo_plot_paths(
         "velocity": base_path / "monte_carlo_velocity.png",
         "attitude": base_path / f"monte_carlo_attitude_{attitude_plot_suffix}.png",
         "angular_velocity": base_path / "monte_carlo_angular_velocity.png",
+        "rho": base_path / "monte_carlo_rho.png",
     }
 
 
@@ -209,6 +212,7 @@ def plot_monte_carlo_trials(
     velocity_trials: list[tuple[np.ndarray, np.ndarray]] = []
     attitude_trials: list[tuple[np.ndarray, np.ndarray]] = []
     omega_trials: list[tuple[np.ndarray, np.ndarray]] = []
+    rho_trials: list[tuple[np.ndarray, np.ndarray]] = []
     for run in valid_runs:
         state_path = Path(str(run["state_file"]))
         with np.load(state_path) as data:
@@ -218,6 +222,7 @@ def plot_monte_carlo_trials(
         velocity_trials.append((times, history[:, ctx.idx["VEL_ECI"]]))
         attitude_trials.append((times, attitude_plot_values(ctx, history[:, ctx.idx["ATTITUDE"]])))
         omega_trials.append((times, history[:, ctx.idx["ATTITUDE_RATE"]]))
+        rho_trials.append((times, history[:, ctx.idx["RHO"]]))
 
     attitude_suffix = "quaternion" if ctx.attitude_plot_mode == "quaternion" else "euler"
     summary_root_dir = Path(str(summary.get("root_dir", ctx.config_path.parent / "results")))
@@ -254,6 +259,14 @@ def plot_monte_carlo_trials(
             "trial_series": omega_trials,
             "overlay": ctx.attitude_plot_layout == "overlay",
             "ylabel": "angular velocity [rad/s]",
+        },
+        {
+            "title": "Gyrostat Momentum Components",
+            "labels": ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
+            "colors": ["#7c2d12", "#be123c", "#4338ca"],
+            "trial_series": rho_trials,
+            "overlay": ctx.attitude_plot_layout == "overlay",
+            "ylabel": "rho [kg m^2/s]",
         },
     ]
 
@@ -325,6 +338,24 @@ def plot_monte_carlo_trials(
                 line_alpha,
             )
         ),
+        "rho": (
+            plot_monte_carlo_component_overlay(
+                rho_trials,
+                ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
+                ["#7c2d12", "#be123c", "#4338ca"],
+                "Gyrostat Momentum Components",
+                "rho [kg m^2/s]",
+                line_alpha,
+            )
+            if ctx.attitude_plot_layout == "overlay"
+            else plot_monte_carlo_component_stack(
+                rho_trials,
+                ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
+                ["#7c2d12", "#be123c", "#4338ca"],
+                "Gyrostat Momentum Components",
+                line_alpha,
+            )
+        ),
     }
     save_figure(ctx.logger, figures["position"], plot_paths["position"], "Monte Carlo position plot saved", dpi=180)
     save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Monte Carlo velocity plot saved", dpi=180)
@@ -336,6 +367,7 @@ def plot_monte_carlo_trials(
         "Monte Carlo angular velocity plot saved",
         dpi=180,
     )
+    save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Monte Carlo gyrostat momentum plot saved", dpi=180)
 
     if show:
         plt.show()

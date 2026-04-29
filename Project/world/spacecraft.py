@@ -19,13 +19,13 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 
-from world.math import rotation_vector_exponential
+from world.math import rotation_vector_exponential, skew_symmetric
 from world.models.constants import MU_EARTH
 
 class Spacecraft:
     """Spacecraft object for the ARGUS Satellite"""
 
-    BASE_STATE_SIZE = 13 # [position(3), velocity(3), quaternion(4), omega(3)]
+    BASE_STATE_SIZE = 16 # [quaternion(4), omega(3), position(3), velocity(3), rho(3)]
 
     def __init__(self, config_path: str | Path = Path(__file__).with_name("config.yaml")) -> None:
         """Initialize the spacecraft object from a YAML config file."""
@@ -34,12 +34,17 @@ class Spacecraft:
         self.names: list[str] = []
         self.debug: bool = False
         self.augment_inertia: bool = False
+        self.inertia_seed: int | None = None
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
         self.mass_deviation_fraction: np.ndarray = np.zeros(3, dtype=float)
         self.rotation_deviation_rad: np.ndarray = np.zeros(3, dtype=float)
+        self.desired_spin_axis: np.ndarray = np.array([0.0, 0.0, 1.0], dtype=float)
+        self.desired_spin_rate: float = 0.0
+        self.J_eff: float = 0.0
         self.last_inertia_fractional_perturbation: np.ndarray = np.zeros(3, dtype=float)
         self.last_inertia_rotation_vector: np.ndarray = np.zeros(3, dtype=float)
         self.inertia_tensor: np.ndarray = np.zeros((3, 3), dtype=float)
+        self.rho: np.ndarray = np.zeros(3, dtype=float)
         self.position_vectors: np.ndarray = np.empty((0, 3), dtype=float)
         self.dimension_vectors: np.ndarray = np.empty((0, 3), dtype=float)
         self.face_dimensions: list[Dict[str, np.ndarray]] = []
@@ -49,10 +54,11 @@ class Spacecraft:
         self.state_size: int = self.BASE_STATE_SIZE
         self.Idx: dict[str, dict[str, slice]] = {
             "X": {
-                "POS_ECI": slice(0, 3),
-                "VEL_ECI": slice(3, 6),
-                "ATTITUDE": slice(6, 10),
-                "ATTITUDE_RATE": slice(10, 13),
+                "ATTITUDE": slice(0, 4),
+                "ATTITUDE_RATE": slice(4, 7),
+                "POS_ECI": slice(7, 10),
+                "VEL_ECI": slice(10, 13),
+                "RHO": slice(13, 16),
             }
         }
         self.state: np.ndarray = np.zeros(self.state_size, dtype=float)
@@ -95,6 +101,11 @@ class Spacecraft:
     def _property_bool(cls, items: Iterable[Dict], target_name: str, default: bool = False) -> bool:
         """Extract and normalize a named boolean property."""
         return cls._as_bool(cls._property_value(items, target_name, default), default)
+
+    @classmethod
+    def _property_array(cls, items: Iterable[Dict], target_name: str, default: object) -> np.ndarray:
+        """Extract a named vector property."""
+        return np.asarray(cls._property_value(items, target_name, default), dtype=float)
 
 
     # Bunch of YAML parsing helpers
@@ -160,27 +171,42 @@ class Spacecraft:
             "augment_inertia",
             default=False,
         )
-        self.mass_deviation_fraction = np.asarray(
-            self._property_value(inertia_properties, "mass_deviation", [0.0, 0.0, 0.0]),
-            dtype=float,
+        inertia_seed = self._property_value(inertia_properties, "inertia_seed", None)
+        self.inertia_seed = None if inertia_seed is None else int(inertia_seed)
+        self.mass_deviation_fraction = self._property_array(
+            inertia_properties,
+            "mass_deviation",
+            [0.0, 0.0, 0.0],
         )
-        self.rotation_deviation_rad = np.asarray(
-            self._property_value(inertia_properties, "rotation_deviation", [0.0, 0.0, 0.0]),
-            dtype=float,
+        self.rotation_deviation_rad = self._property_array(
+            inertia_properties,
+            "rotation_deviation",
+            [0.0, 0.0, 0.0],
         )
+        safe_mode_properties: Iterable[Dict] = cfg.get("safe_mode_properties", [])
+        self.desired_spin_axis = self._property_array(
+            safe_mode_properties,
+            "desired_spin_axis",
+            [0.0, 0.0, 1.0],
+        )
+        self.desired_spin_rate = float(
+            self._property_value(safe_mode_properties, "desired_spin_rate", 0.0)
+        )
+        self.J_eff = float(self._property_value(safe_mode_properties, "J_eff", 0.0))
 
         dynamics_properties: Iterable[Dict] = cfg.get("dynamics_properties", [])
         raw_state_size = self._property_value(dynamics_properties, "state_size", self.BASE_STATE_SIZE)
         self.state_size = int(raw_state_size)
         if self.state_size < self.BASE_STATE_SIZE:
-            raise ValueError(f"state_size must be >= {self.BASE_STATE_SIZE} to hold [r, v, q, omega]")
+            raise ValueError(f"state_size must be >= {self.BASE_STATE_SIZE} to hold [q, omega, r, v, rho]")
 
         self.Idx = {
             "X": {
-                "POS_ECI": slice(0, 3),
-                "VEL_ECI": slice(3, 6),
-                "ATTITUDE": slice(6, 10),
-                "ATTITUDE_RATE": slice(10, 13),
+                "ATTITUDE": slice(0, 4),
+                "ATTITUDE_RATE": slice(4, 7),
+                "POS_ECI": slice(7, 10),
+                "VEL_ECI": slice(10, 13),
+                "RHO": slice(13, 16),
             }
         }
         self.state = np.zeros(self.state_size, dtype=float)
@@ -246,7 +272,10 @@ class Spacecraft:
         )
         self.face_dimensions = face_dimensions
         self.face_normals = face_normals
-        self.compute_inertia_tensor(augment=self.augment_inertia)
+        rng = None if self.inertia_seed is None else np.random.default_rng(self.inertia_seed)
+        self.compute_inertia_tensor(augment=self.augment_inertia, rng=rng)
+        self.rho = self.compute_dynamic_balance()
+        self.state[self.Idx["X"]["RHO"]] = self.rho
 
     @staticmethod
     def _state_from_orbital_elements(
@@ -303,6 +332,7 @@ class Spacecraft:
         self.velocity_eci = self.state[self.Idx["X"]["VEL_ECI"]]
         self.attitude = self.state[self.Idx["X"]["ATTITUDE"]]
         self.attitude_rate = self.state[self.Idx["X"]["ATTITUDE_RATE"]]
+        self.rho = self.state[self.Idx["X"]["RHO"]]
 
     def get_state(self) -> np.ndarray:
         """Return full state vector sized by the model configuration."""
@@ -310,6 +340,7 @@ class Spacecraft:
         self.state[self.Idx["X"]["VEL_ECI"]] = self.velocity_eci
         self.state[self.Idx["X"]["ATTITUDE"]] = self.attitude
         self.state[self.Idx["X"]["ATTITUDE_RATE"]] = self.attitude_rate
+        self.state[self.Idx["X"]["RHO"]] = self.rho
         return self.state
 
     def compute_center_of_mass(self) -> np.ndarray:
@@ -324,8 +355,17 @@ class Spacecraft:
         com = np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0) / total_mass
 
         return com
+    
+    def compute_principal_inertia_components(
+        self,
+        inertia_tensor: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return principal moments and principal axes for J = V D V^T."""
+        inertia = self.inertia_tensor if inertia_tensor is None else np.asarray(inertia_tensor, dtype=float)
+        principal_moments, principal_axes = np.linalg.eigh(inertia)
+        return principal_moments, principal_axes
 
-    def augment_inertia_tensor(
+    def compute_augment_inertia_tensor(
         self,
         nominal_inertia_tensor: np.ndarray,
         rng: np.random.Generator | None = None,
@@ -342,20 +382,18 @@ class Spacecraft:
         if rng is None:
             rng = np.random.default_rng()
 
-
-        principal_axes, principal_moments, _ = np.linalg.svd(nominal_inertia_tensor)
+        J_principal, principal_axes = self.compute_principal_inertia_components(nominal_inertia_tensor)
 
         # Compute D_aug
         d = self.mass_deviation_fraction * rng.standard_normal(size=3)
-        
-        augmented_axes = principal_axes @ rotation_perturbation
-        augmented_moments = principal_moments * (1.0 + d)
-        augmented_inertia = augmented_axes @ np.diag(augmented_moments) @ augmented_axes.T
 
         # Compute V_aug
         rotation_vector = self.rotation_deviation_rad * rng.standard_normal(size=3)
         rotation_perturbation = rotation_vector_exponential(rotation_vector)
 
+        augmented_axes = principal_axes @ rotation_perturbation
+        augmented_moments = J_principal * (1.0 + d)
+        augmented_inertia = augmented_axes @ np.diag(augmented_moments) @ augmented_axes.T
 
         self.last_inertia_fractional_perturbation = d
         self.last_inertia_rotation_vector = rotation_vector
@@ -396,14 +434,14 @@ class Spacecraft:
 
         # Homework 2 augmentation for safe mode
         if use_augmentation:
-            inertia_tensor = self.augment_inertia_tensor(inertia_tensor, rng=rng)
+            inertia_tensor = self.compute_augment_inertia_tensor(inertia_tensor, rng=rng)
         else:
             self.last_inertia_fractional_perturbation = np.zeros(3, dtype=float)
             self.last_inertia_rotation_vector = np.zeros(3, dtype=float)
 
         self.inertia_tensor = inertia_tensor
         if self.debug:
-            principal_moments, principal_axes = np.linalg.eigh(self.inertia_tensor)
+            J_principal, principal_axes = self.compute_principal_inertia_components()
             body_to_principal = principal_axes.T
 
             for name, component_inertia in component_inertias:
@@ -412,11 +450,38 @@ class Spacecraft:
             print("Spacecraft inertia tensor [kg m^2]:")
             print(np.array2string(self.inertia_tensor, precision=6, separator=", "))
             print("Principal moments [kg m^2]:")
-            print(np.array2string(principal_moments, precision=6, separator=", "))
+            print(np.array2string(J_principal, precision=6, separator=", "))
             print("Principal-to-body rotation matrix R_B_P [-]:")
             print(np.array2string(principal_axes, precision=6, separator=", "))
             print("Body-to-principal rotation matrix R_P_B [-]:")
-            print(np.array2string(body_to_principal, precision=6, separator=", "))
-
+            print(np.array2string(body_to_principal, precision=6, separator=", "))  
         return self.inertia_tensor
+
+    def compute_dynamic_balance(self) -> np.ndarray:
+        """Compute gyrostat rho (momentum) using the least squares solution in class"""
         
+        # This is in the body frame
+        J = self.inertia_tensor
+        omega = self.desired_spin_rate * self.desired_spin_axis
+
+        omega_s = np.linalg.norm(omega)
+        s = omega / omega_s
+        J_s = s @ J @ s
+        J_principal, _ = self.compute_principal_inertia_components()
+        J_eff = self.J_eff * J_principal[2]
+
+        rho_s = omega_s * (J_eff - J_s)
+
+        # Now do the psuedo-inverse to find rho
+        omega_hat = skew_symmetric(omega)
+        wsps = omega_s * rho_s
+        w_hat_Jw = omega_hat @ self.inertia_tensor @ omega # this is omega x J omega
+        
+        A = np.vstack([omega, omega_hat])
+        b = np.hstack([wsps, -w_hat_Jw])
+
+        # Using numpy implementation to speed up the simulation, but this is the same as the notes from class
+        # rho = (A .T @ A)^(-1) @ A.T @ b
+        rho, _, _, _= np.linalg.lstsq(A, b, rcond=None) 
+
+        return rho

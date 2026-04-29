@@ -11,7 +11,7 @@ simulation_properties:
     value: 0.1 # seconds
 
   - name: max_simulation_time
-    value: 600.0 # seconds
+    value: 6000.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -46,11 +46,21 @@ initial_conditions:
     value: [1.0, 0.0, 0.0, 0.0] # quaternion (w x y z)
 
   - name: attitude_rate
-    value: [1.0407409737537963, 1.0407409737537963, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
+    value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
     nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
     deviation: [0.9, 0.9, 0.9] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
+safe_mode_properties:
+
+  - name: desired_spin_axis
+    value: [0.0, 0.0, 1.0] # body-frame solar normal, +z
+
+  - name: desired_spin_rate
+    value: 1.0407409737537963 # rad/s
+
+  - name: J_eff
+    value: 1.2 # relative to principal J33 (i.e. J_eff = 1.2 means J_eff is 20% larger than the largest principal moment of inertia))
 
 physical_properties:
 
@@ -79,7 +89,6 @@ physical_properties:
       y: 0.0 # m
       z: 0.0 # m
     mass: 1.15 # kg
-    mass_deviation: 0.05 # kg
 
   - name: x+_deployable
     dimensions:
@@ -102,7 +111,6 @@ physical_properties:
       y: 0.0
       z: 0.0
     mass: 0.03507 # kg
-    mass_deviation: 0.01 # kg
 
   - name: x-_deployable
     dimensions: 
@@ -125,7 +133,6 @@ physical_properties:
       y: 0.0
       z: 0.0
     mass: 0.03507 # kg
-    mass_deviation: 0.01 # kg
 
   - name: y+_deployable
     dimensions: 
@@ -148,7 +155,6 @@ physical_properties:
       y: 1.0
       z: 0.0
     mass: 0.03507 # kg
-    mass_deviation: 0.01 # kg
 
   - name: y-_deployable
     dimensions: 
@@ -171,14 +177,25 @@ physical_properties:
       y: -1.0
       z: 0.0
     mass: 0.03507 # kg
-    mass_deviation: 0.01 # kg
 
+inertia_properties:
+
+  - name: augment_inertia
+    value: True
+
+  - name: inertia_seed
+    value: 42
+
+  - name: mass_deviation
+    value: [0.05, 0.05, 0.05] # fractional mass perturbation applied to principal moments, 0-1
+
+  - name: rotation_deviation
+    value: [0.05, 0.05, 0.05] # standard deviation for sampled principal-axis rotation vector, rad
 
 dynamics_properties:
 
   - name: state_size
-    value: 13 # position, velocity, quaternion, angular velocity
-
+    value: 16 # quaternion, angular velocity, position, velocity, gyrostat momentum rho
 
 integration_properties:
 
@@ -189,7 +206,7 @@ integration_properties:
 plotting_properties:
 
   - name: layout
-    value: separate # together or separate
+    value: together # together or separate
 
   - name: attitude_plot_layout
     value: overlay # overlay or stacked; applies to attitude and angular velocity plots

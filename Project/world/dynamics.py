@@ -46,9 +46,19 @@ def attitude_dynamics(
 
     q = state[attitude_slice]
     w = state[attitude_rate_slice]
+    rho = state[state_index["RHO"]]
 
     qdot = 0.5 * attitude_jacobian(q) @ w # Attitude Jacobian from Notes
-    wdot = np.linalg.solve(inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w)) # Euler's Equation from Notes
+
+    # Using the numpy solver to speed up the simulation, but this is the same as the notes (no gyrostats, tau = 0):
+    # First, convert J into the principal components frame
+    # Then solve each component of euler separately:
+    # wdot_1 = -(J33 - J22)* w2 * w3 / J11
+    # wdot_2 = -(J11 - J33)* w1 * w3 / J22
+    # wdot_3 = -(J22 - J11)* w1 * w2 / J33
+
+    # This time add the gyrostat momentum (rhodot = 0)
+    wdot = np.linalg.solve(inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w + rho)) # J wdot + w x (Jw + rho) = 0
 
     state_dot[attitude_slice] = qdot
     state_dot[attitude_rate_slice] = wdot

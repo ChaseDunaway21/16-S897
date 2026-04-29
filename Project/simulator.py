@@ -56,6 +56,7 @@ def _run_single_monte_carlo_trial(
         "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
         "final_attitude": final_state[idx["ATTITUDE"]].tolist(),
         "final_omega_rads": final_state[idx["ATTITUDE_RATE"]].tolist(),
+        "final_rho_kgm2s": final_state[idx["RHO"]].tolist(),
     }
 
 class Simulator:
@@ -221,6 +222,14 @@ class Simulator:
 
             item["value"] = sampled_value
 
+        inertia_properties = trial_cfg.get("inertia_properties", []) or []
+        inertia_seed = self._property_item(inertia_properties, "inertia_seed")
+        if inertia_seed is None:
+            inertia_properties.append({"name": "inertia_seed", "value": seed + trial_index})
+            trial_cfg["inertia_properties"] = inertia_properties
+        else:
+            inertia_seed["value"] = seed + trial_index
+
         return trial_cfg
 
     @staticmethod
@@ -274,6 +283,7 @@ class Simulator:
         self.logger.info("  velocity [m/s]: %s", self._vector_to_string(state[self.idx["VEL_ECI"]]))
         self.logger.info("  attitude [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE"]]))
         self.logger.info("  omega [rad/s]: %s", self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]))
+        self.logger.info("  rho [kg m^2/s]: %s", self._vector_to_string(state[self.idx["RHO"]]))
 
     @staticmethod
     def _progress_fraction(current: int, total: int) -> float:
@@ -309,6 +319,17 @@ class Simulator:
             num_steps,
             self.integration_method,
         )
+        rho = state[self.idx["RHO"]]
+        J_principal, _ = self.spacecraft.compute_principal_inertia_components()
+        J_eff = self.spacecraft.J_eff * J_principal[2]
+        rho_message = (
+            f"Dynamic balance rho (Jeff = J_33 * {self.spacecraft.J_eff:.6g}): "
+            f"{self._vector_to_string(rho)} [kg m^2/s] "
+            f" | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
+        )
+        self.logger.info(rho_message)
+        if show_progress or self.spacecraft.debug:
+            print(rho_message)
         self._log_state_components("Initial state", state, step=0, total_steps=num_steps, time_s=0.0)
 
         times = np.zeros(num_steps + 1, dtype=float)
@@ -343,6 +364,7 @@ class Simulator:
         updated_state = self.spacecraft.get_state()
         updated_state[self.idx["POS_ECI"]] = final_pos_m
         updated_state[self.idx["VEL_ECI"]] = final_vel_ms
+        updated_state[self.idx["RHO"]] = final_state[self.idx["RHO"]]
         self.spacecraft.set_state(updated_state)
 
         self.logger.info("Simulation complete")
@@ -356,6 +378,7 @@ class Simulator:
             "sim_duration_s": sim_duration,
             "num_steps": num_steps,
             "log_file": str(self.log_file),
+            "dynamic_balance_rho": rho,
         }
 
     def run_monte_carlo(

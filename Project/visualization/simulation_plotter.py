@@ -79,6 +79,7 @@ def simulation_plot_paths(
             "velocity": root_dir / "simulation_velocity.png",
             "attitude": root_dir / attitude_filename,
             "angular_velocity": root_dir / "simulation_angular_velocity.png",
+            "rho": root_dir / "simulation_rho.png",
         }
 
     base_path = Path(save_path)
@@ -94,6 +95,7 @@ def simulation_plot_paths(
             "velocity": root_dir / f"{prefix}_velocity.png",
             "attitude": root_dir / f"{prefix}_{Path(attitude_filename).stem}.png",
             "angular_velocity": root_dir / f"{prefix}_angular_velocity.png",
+            "rho": root_dir / f"{prefix}_rho.png",
         }
 
     return {
@@ -101,6 +103,7 @@ def simulation_plot_paths(
         "velocity": base_path / "simulation_velocity.png",
         "attitude": base_path / attitude_filename,
         "angular_velocity": base_path / "simulation_angular_velocity.png",
+        "rho": base_path / "simulation_rho.png",
     }
 
 
@@ -262,6 +265,7 @@ def plot_simulation_overview(
     vel_kms: np.ndarray,
     attitude_spec: dict[str, object],
     att_rate: np.ndarray,
+    rho: np.ndarray,
 ) -> plt.Figure:
     att_values = np.asarray(attitude_spec["values"], dtype=float)
     att_labels = list(attitude_spec["labels"])
@@ -269,12 +273,14 @@ def plot_simulation_overview(
     angle_ylabel = "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]"
     omega_colors = ["#2563eb", "#f97316", "#059669"]
     omega_labels = ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"]
+    rho_colors = ["#7c2d12", "#be123c", "#4338ca"]
+    rho_labels = ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"]
     overlay_attitude_plots = ctx.attitude_plot_layout == "overlay"
 
     if overlay_attitude_plots:
-        fig_height = 14.5
+        fig_height = 17.0
     else:
-        fig_height = 11.5 + 0.65 * (att_values.shape[1] + att_rate.shape[1])
+        fig_height = 11.5 + 0.65 * (att_values.shape[1] + att_rate.shape[1] + rho.shape[1])
     fig = plt.figure(figsize=(17, fig_height), facecolor=FIGURE_FACE_COLOR)
     fig.suptitle("ARGUS Simulation Overview", fontsize=16, fontweight="bold", y=0.98)
 
@@ -325,7 +331,7 @@ def plot_simulation_overview(
     ax_vel.set_box_aspect(1)
 
     if overlay_attitude_plots:
-        component_gs = gs[1, :].subgridspec(2, 1, hspace=0.25)
+        component_gs = gs[1, :].subgridspec(3, 1, hspace=0.25)
 
         ax_att = fig.add_subplot(component_gs[0, 0])
         style_time_axis(ax_att)
@@ -347,11 +353,26 @@ def plot_simulation_overview(
                 label=omega_labels[i],
             )
         ax_omega.set_title("Angular Velocity Components")
-        ax_omega.set_xlabel("time [s]")
         ax_omega.set_ylabel("angular velocity [rad/s]")
         ax_omega.legend(loc="upper right")
+        ax_omega.tick_params(labelbottom=False)
+
+        ax_rho = fig.add_subplot(component_gs[2, 0])
+        style_time_axis(ax_rho)
+        for i in range(rho.shape[1]):
+            ax_rho.plot(
+                times,
+                rho[:, i],
+                linewidth=1.5,
+                color=rho_colors[i % len(rho_colors)],
+                label=rho_labels[i],
+            )
+        ax_rho.set_title("Gyrostat Momentum Components")
+        ax_rho.set_xlabel("time [s]")
+        ax_rho.set_ylabel("rho [kg m^2/s]")
+        ax_rho.legend(loc="upper right")
     else:
-        total_rows = att_values.shape[1] + att_rate.shape[1]
+        total_rows = att_values.shape[1] + att_rate.shape[1] + rho.shape[1]
         component_gs = gs[1, :].subgridspec(total_rows, 1, hspace=0.22)
 
         for i in range(att_values.shape[1]):
@@ -376,7 +397,23 @@ def plot_simulation_overview(
             ax.set_ylabel(omega_labels[i])
             if i == 0:
                 ax.set_title("Angular Velocity Components")
-            if i < (att_rate.shape[1] - 1):
+            ax.tick_params(labelbottom=False)
+
+        rho_row_start = att_values.shape[1] + att_rate.shape[1]
+        for i in range(rho.shape[1]):
+            ax = fig.add_subplot(component_gs[rho_row_start + i, 0])
+            style_time_axis(ax)
+            ax.plot(
+                times,
+                rho[:, i],
+                linewidth=1.4,
+                color=rho_colors[i % len(rho_colors)],
+                label=rho_labels[i],
+            )
+            ax.set_ylabel(rho_labels[i])
+            if i == 0:
+                ax.set_title("Gyrostat Momentum Components")
+            if i < (rho.shape[1] - 1):
                 ax.tick_params(labelbottom=False)
             else:
                 ax.set_xlabel("time [s]")
@@ -400,11 +437,12 @@ def plot_simulation(
     vel_kms = history[:, ctx.idx["VEL_ECI"]] / 1_000.0
     att = history[:, ctx.idx["ATTITUDE"]]
     att_rate = history[:, ctx.idx["ATTITUDE_RATE"]]
+    rho = history[:, ctx.idx["RHO"]]
     current_attitude_spec = attitude_plot_spec(ctx, att)
     plot_paths = simulation_plot_paths(ctx, save_path, str(current_attitude_spec["filename"]))
 
     if ctx.plot_layout == "together":
-        fig = plot_simulation_overview(ctx, times, pos_km, vel_kms, current_attitude_spec, att_rate)
+        fig = plot_simulation_overview(ctx, times, pos_km, vel_kms, current_attitude_spec, att_rate, rho)
         save_figure(ctx.logger, fig, plot_paths["overview"], "Simulation plot saved")
 
         if show:
@@ -451,6 +489,24 @@ def plot_simulation(
                 "Angular Velocity Components",
             )
         ),
+        "rho": (
+            plot_component_overlay(
+                times,
+                rho,
+                ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
+                ["#7c2d12", "#be123c", "#4338ca"],
+                "Gyrostat Momentum Components",
+                "rho [kg m^2/s]",
+            )
+            if ctx.attitude_plot_layout == "overlay"
+            else plot_component_stack(
+                times,
+                rho,
+                ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
+                ["#7c2d12", "#be123c", "#4338ca"],
+                "Gyrostat Momentum Components",
+            )
+        ),
     }
     save_figure(ctx.logger, figures["trajectory"], plot_paths["trajectory"], "Trajectory plot saved")
     save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Velocity plot saved")
@@ -461,6 +517,7 @@ def plot_simulation(
         plot_paths["angular_velocity"],
         "Angular velocity plot saved",
     )
+    save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Gyrostat momentum plot saved")
 
     if show:
         plt.show()

@@ -28,13 +28,14 @@ def plot_momentum_sphere(
     show: bool = True,
     save_path: str | Path | None = None,
 ) -> plt.Figure:
-    """Plot the spacecraft's normalized body angular momentum on the unit sphere."""
+    """Plot the spacecraft's normalized total body angular momentum on the unit sphere."""
 
     history = np.asarray(result["state_history_si"], dtype=float)
     w = history[:, ctx.idx["ATTITUDE_RATE"]]
+    rho = history[:, ctx.idx["RHO"]]
     inertia_tensor = ctx.spacecraft.inertia_tensor
 
-    h_body = (inertia_tensor @ w.T).T # From lecture notes
+    h_body = (inertia_tensor @ w.T).T + rho # From lecture notes
     h_magnitude = np.linalg.norm(h_body, axis=1)
     h_norm = h_magnitude[:, np.newaxis]
     h_norm[h_norm == 0.0] = 1.0
@@ -147,11 +148,11 @@ def plot_momentum_sphere(
                 markeredgecolor="white",
                 markeredgewidth=0.9,
                 markersize=9,
-                label=f"- Principal Axis {i}",
+                label=f"-  Principal Axis {i}",
             )
         )
 
-    ax.set_title("Normalized Body Angular Momentum Sphere with Energy Gradient")
+    ax.set_title("Normalized Total Body Angular Momentum Sphere with Energy Gradient")
     ax.set_xlabel("Lx / ||L|| [-]")
     ax.set_ylabel("Ly / ||L|| [-]")
     ax.set_zlabel("Lz / ||L|| [-]")

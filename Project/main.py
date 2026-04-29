@@ -48,6 +48,7 @@ def main() -> None:
 	print(f"  velocity [m/s]: {sim.spacecraft.velocity_eci}")
 	print(f"  attitude [-]: {sim.spacecraft.attitude}")
 	print(f"  omega [rad/s]: {sim.spacecraft.attitude_rate}")
+	print(f"  rho [kg m^2/s]: {sim.spacecraft.rho}")
 
 
 if __name__ == "__main__":
