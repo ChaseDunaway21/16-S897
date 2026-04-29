@@ -42,7 +42,8 @@ def _run_single_monte_carlo_trial(
     )
     if save_plots:
         sim.plot_simulation(result, show=False)
-        sim.plot_momentum_sphere(result, show=False)
+        if sim.show_momentum_sphere_plot:
+            sim.plot_momentum_sphere(result, show=False)
 
     final_state = np.asarray(result["state_history_si"])[-1]
     idx = sim.idx
@@ -106,14 +107,15 @@ class Simulator:
         self.integration_method = str(
             self._property_value(self.cfg.get("integration_properties", []), "integration_method", "rk4")
         ).lower()
+        plotting_properties = self.cfg.get("plotting_properties", [])
         self.plot_layout = self._validated_option(
-            self._property_value(self.cfg.get("plotting_properties", []), "layout", "together"),
+            self._property_value(plotting_properties, "layout", "together"),
             {"together", "separate"},
             "plotting_properties.layout",
         )
         self.attitude_plot_layout = self._validated_option(
             self._property_value(
-                self.cfg.get("plotting_properties", []),
+                plotting_properties,
                 "attitude_plot_layout",
                 "overlay",
             ),
@@ -122,12 +124,40 @@ class Simulator:
         )
         self.attitude_plot_mode = self._validated_option(
             self._property_value(
-                self.cfg.get("plotting_properties", []),
+                plotting_properties,
                 "attitude_representation",
                 "quaternion",
             ),
             {"quaternion", "euler"},
             "plotting_properties.attitude_representation",
+        )
+        self.show_simulation_overview = self._property_bool(
+            plotting_properties,
+            "show_simulation_overview",
+            True,
+        )
+        self.show_trajectory_plot = self._property_bool(plotting_properties, "show_trajectory_plot", True)
+        self.show_velocity_plot = self._property_bool(plotting_properties, "show_velocity_plot", True)
+        self.show_attitude_plot = self._property_bool(plotting_properties, "show_attitude_plot", True)
+        self.show_angular_velocity_plot = self._property_bool(
+            plotting_properties,
+            "show_angular_velocity_plot",
+            True,
+        )
+        self.show_gyrostat_components = self._property_bool(
+            plotting_properties,
+            "show_gyrostat_components",
+            True,
+        )
+        self.show_sun_safe_mode_axis_plot = self._property_bool(
+            plotting_properties,
+            "show_sun_safe_mode_axis_plot",
+            True,
+        )
+        self.show_momentum_sphere_plot = self._property_bool(
+            plotting_properties,
+            "show_momentum_sphere_plot",
+            True,
         )
 
         if self.integration_method != "rk4":
@@ -157,6 +187,13 @@ class Simulator:
             if str(item.get("name", "")).strip() == target_name:
                 return item
         return None
+
+    @classmethod
+    def _property_bool(cls, items: Iterable[Dict], target_name: str, default: bool = True) -> bool:
+        value = cls._property_value(items, target_name, default)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     @staticmethod
     def _validated_option(value: object, valid_options: set[str], field_name: str) -> str:
@@ -235,8 +272,6 @@ class Simulator:
     @staticmethod
     def _orbit_period_seconds(position_m: np.ndarray) -> float:
         r = np.linalg.norm(position_m)
-        if r <= 0.0:
-            raise ValueError("Initial position norm must be positive")
         return 2.0 * np.pi * np.sqrt(r**3 / MU_EARTH) # TODO Change for non-circular orbits later
 
     def _setup_logger(self) -> Path:
@@ -330,6 +365,17 @@ class Simulator:
         self.logger.info(rho_message)
         if show_progress or self.spacecraft.debug:
             print(rho_message)
+        desired_omega = self.spacecraft.desired_spin_rate * self.spacecraft.desired_spin_axis
+        initial_omega = state[self.idx["ATTITUDE_RATE"]]
+        omega_error = initial_omega - desired_omega
+        if np.linalg.norm(omega_error) > 1e-9:
+            self.logger.warning(
+                "Initial omega differs from dynamic-balance omega by %s rad/s; "
+                "rho is balanced for desired omega %s rad/s, not the current initial omega %s rad/s",
+                self._vector_to_string(omega_error),
+                self._vector_to_string(desired_omega),
+                self._vector_to_string(initial_omega),
+            )
         self._log_state_components("Initial state", state, step=0, total_steps=num_steps, time_s=0.0)
 
         times = np.zeros(num_steps + 1, dtype=float)

@@ -17,7 +17,7 @@ from .common import (
     set_equal_orbit_axes,
     style_time_axis,
 )
-from world.math import quaternion_to_euler
+from world.math import R_body_to_inertial, quaternion_to_euler
 from world.models.constants import RADIUS_EARTH
 
 
@@ -26,6 +26,14 @@ class SimulationPlotContext(Protocol):
     plot_layout: str
     attitude_plot_layout: str
     attitude_plot_mode: str
+    show_simulation_overview: bool
+    show_trajectory_plot: bool
+    show_velocity_plot: bool
+    show_attitude_plot: bool
+    show_angular_velocity_plot: bool
+    show_gyrostat_components: bool
+    show_sun_safe_mode_axis_plot: bool
+    spacecraft: Any
     output_dir: Path | None
     config_path: Path
     logger: logging.Logger
@@ -80,11 +88,22 @@ def simulation_plot_paths(
             "attitude": root_dir / attitude_filename,
             "angular_velocity": root_dir / "simulation_angular_velocity.png",
             "rho": root_dir / "simulation_rho.png",
+            "sun_safe_mode_axis": root_dir / "simulation_sun_safe_mode_axis.png",
         }
 
     base_path = Path(save_path)
     if ctx.plot_layout == "together":
-        return {"overview": base_path}
+        if base_path.suffix:
+            return {
+                "overview": base_path,
+                "sun_safe_mode_axis": base_path.with_name(
+                    f"{base_path.stem}_sun_safe_mode_axis{base_path.suffix}"
+                ),
+            }
+        return {
+            "overview": base_path,
+            "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
+        }
 
     if base_path.suffix:
         stem_path = base_path.with_suffix("")
@@ -96,6 +115,7 @@ def simulation_plot_paths(
             "attitude": root_dir / f"{prefix}_{Path(attitude_filename).stem}.png",
             "angular_velocity": root_dir / f"{prefix}_angular_velocity.png",
             "rho": root_dir / f"{prefix}_rho.png",
+            "sun_safe_mode_axis": root_dir / f"{prefix}_sun_safe_mode_axis.png",
         }
 
     return {
@@ -104,6 +124,7 @@ def simulation_plot_paths(
         "attitude": base_path / attitude_filename,
         "angular_velocity": base_path / "simulation_angular_velocity.png",
         "rho": base_path / "simulation_rho.png",
+        "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
     }
 
 
@@ -196,6 +217,73 @@ def plot_velocity_figure(times: np.ndarray, vel_kms: np.ndarray) -> plt.Figure:
     return fig
 
 
+def sun_safe_mode_axis_values(
+    ctx: SimulationPlotContext,
+    attitudes: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    sun_eci = np.asarray(ctx.spacecraft.sun_vector_eci(), dtype=float)
+    sun_eci = sun_eci / np.linalg.norm(sun_eci)
+
+    safe_axis_body = np.asarray(ctx.spacecraft.desired_spin_axis, dtype=float)
+    safe_axis_body = safe_axis_body / np.linalg.norm(safe_axis_body)
+
+    safe_axis_eci = np.asarray(
+        [
+            R_body_to_inertial(q / np.linalg.norm(q)) @ safe_axis_body
+            for q in np.asarray(attitudes, dtype=float)
+        ],
+        dtype=float,
+    )
+    safe_axis_eci /= np.linalg.norm(safe_axis_eci, axis=1, keepdims=True)
+
+    alignment = np.clip(safe_axis_eci @ sun_eci, -1.0, 1.0)
+    return sun_eci, safe_axis_eci, np.rad2deg(np.arccos(alignment))
+
+
+def plot_sun_safe_mode_axis_figure(
+    times: np.ndarray,
+    sun_eci: np.ndarray,
+    safe_axis_eci: np.ndarray,
+    alignment_angle_deg: np.ndarray,
+) -> plt.Figure:
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7), facecolor=FIGURE_FACE_COLOR, sharex=True)
+    safe_colors = ["#dc2626", "#16a34a", "#2563eb"]
+    sun_colors = ["#f97316", "#84cc16", "#38bdf8"]
+    labels = ["x", "y", "z"]
+    sun_history = np.tile(sun_eci, (times.size, 1))
+
+    style_time_axis(axes[0])
+    for i, label in enumerate(labels):
+        axes[0].plot(
+            times,
+            safe_axis_eci[:, i],
+            color=safe_colors[i],
+            linewidth=1.8,
+            label=f"safe {label}",
+        )
+        axes[0].plot(
+            times,
+            sun_history[:, i],
+            color=sun_colors[i],
+            linewidth=1.4,
+            linestyle="--",
+            alpha=0.9,
+            label=f"sun {label}",
+        )
+    axes[0].set_title("Sun Direction and Safe-Mode Axis in ECI")
+    axes[0].set_ylabel("component [-]")
+    axes[0].legend(loc="upper right", ncol=3)
+
+    style_time_axis(axes[1])
+    axes[1].plot(times, alignment_angle_deg, color="#0f172a", linewidth=1.8)
+    axes[1].set_title("Sun/Safe-Mode Axis Separation")
+    axes[1].set_xlabel("time [s]")
+    axes[1].set_ylabel("angle [deg]")
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_component_stack(
     times: np.ndarray,
     values: np.ndarray,
@@ -276,11 +364,13 @@ def plot_simulation_overview(
     rho_colors = ["#7c2d12", "#be123c", "#4338ca"]
     rho_labels = ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"]
     overlay_attitude_plots = ctx.attitude_plot_layout == "overlay"
+    show_rho = ctx.show_gyrostat_components
 
     if overlay_attitude_plots:
-        fig_height = 17.0
+        fig_height = 17.0 if show_rho else 14.5
     else:
-        fig_height = 11.5 + 0.65 * (att_values.shape[1] + att_rate.shape[1] + rho.shape[1])
+        rho_rows = rho.shape[1] if show_rho else 0
+        fig_height = 11.5 + 0.65 * (att_values.shape[1] + att_rate.shape[1] + rho_rows)
     fig = plt.figure(figsize=(17, fig_height), facecolor=FIGURE_FACE_COLOR)
     fig.suptitle("ARGUS Simulation Overview", fontsize=16, fontweight="bold", y=0.98)
 
@@ -331,7 +421,8 @@ def plot_simulation_overview(
     ax_vel.set_box_aspect(1)
 
     if overlay_attitude_plots:
-        component_gs = gs[1, :].subgridspec(3, 1, hspace=0.25)
+        component_rows = 3 if show_rho else 2
+        component_gs = gs[1, :].subgridspec(component_rows, 1, hspace=0.25)
 
         ax_att = fig.add_subplot(component_gs[0, 0])
         style_time_axis(ax_att)
@@ -355,24 +446,29 @@ def plot_simulation_overview(
         ax_omega.set_title("Angular Velocity Components")
         ax_omega.set_ylabel("angular velocity [rad/s]")
         ax_omega.legend(loc="upper right")
-        ax_omega.tick_params(labelbottom=False)
+        if show_rho:
+            ax_omega.tick_params(labelbottom=False)
+        else:
+            ax_omega.set_xlabel("time [s]")
 
-        ax_rho = fig.add_subplot(component_gs[2, 0])
-        style_time_axis(ax_rho)
-        for i in range(rho.shape[1]):
-            ax_rho.plot(
-                times,
-                rho[:, i],
-                linewidth=1.5,
-                color=rho_colors[i % len(rho_colors)],
-                label=rho_labels[i],
-            )
-        ax_rho.set_title("Gyrostat Momentum Components")
-        ax_rho.set_xlabel("time [s]")
-        ax_rho.set_ylabel("rho [kg m^2/s]")
-        ax_rho.legend(loc="upper right")
+        if show_rho:
+            ax_rho = fig.add_subplot(component_gs[2, 0])
+            style_time_axis(ax_rho)
+            for i in range(rho.shape[1]):
+                ax_rho.plot(
+                    times,
+                    rho[:, i],
+                    linewidth=1.5,
+                    color=rho_colors[i % len(rho_colors)],
+                    label=rho_labels[i],
+                )
+            ax_rho.set_title("Gyrostat Momentum Components")
+            ax_rho.set_xlabel("time [s]")
+            ax_rho.set_ylabel("rho [kg m^2/s]")
+            ax_rho.legend(loc="upper right")
     else:
-        total_rows = att_values.shape[1] + att_rate.shape[1] + rho.shape[1]
+        rho_rows = rho.shape[1] if show_rho else 0
+        total_rows = att_values.shape[1] + att_rate.shape[1] + rho_rows
         component_gs = gs[1, :].subgridspec(total_rows, 1, hspace=0.22)
 
         for i in range(att_values.shape[1]):
@@ -397,26 +493,30 @@ def plot_simulation_overview(
             ax.set_ylabel(omega_labels[i])
             if i == 0:
                 ax.set_title("Angular Velocity Components")
-            ax.tick_params(labelbottom=False)
-
-        rho_row_start = att_values.shape[1] + att_rate.shape[1]
-        for i in range(rho.shape[1]):
-            ax = fig.add_subplot(component_gs[rho_row_start + i, 0])
-            style_time_axis(ax)
-            ax.plot(
-                times,
-                rho[:, i],
-                linewidth=1.4,
-                color=rho_colors[i % len(rho_colors)],
-                label=rho_labels[i],
-            )
-            ax.set_ylabel(rho_labels[i])
-            if i == 0:
-                ax.set_title("Gyrostat Momentum Components")
-            if i < (rho.shape[1] - 1):
+            if show_rho or i < (att_rate.shape[1] - 1):
                 ax.tick_params(labelbottom=False)
             else:
                 ax.set_xlabel("time [s]")
+
+        if show_rho:
+            rho_row_start = att_values.shape[1] + att_rate.shape[1]
+            for i in range(rho.shape[1]):
+                ax = fig.add_subplot(component_gs[rho_row_start + i, 0])
+                style_time_axis(ax)
+                ax.plot(
+                    times,
+                    rho[:, i],
+                    linewidth=1.4,
+                    color=rho_colors[i % len(rho_colors)],
+                    label=rho_labels[i],
+                )
+                ax.set_ylabel(rho_labels[i])
+                if i == 0:
+                    ax.set_title("Gyrostat Momentum Components")
+                if i < (rho.shape[1] - 1):
+                    ax.tick_params(labelbottom=False)
+                else:
+                    ax.set_xlabel("time [s]")
 
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.965))
     return fig
@@ -440,20 +540,41 @@ def plot_simulation(
     rho = history[:, ctx.idx["RHO"]]
     current_attitude_spec = attitude_plot_spec(ctx, att)
     plot_paths = simulation_plot_paths(ctx, save_path, str(current_attitude_spec["filename"]))
+    sun_safe_mode_axis_fig = None
+    if ctx.show_sun_safe_mode_axis_plot:
+        sun_eci, safe_axis_eci, alignment_angle_deg = sun_safe_mode_axis_values(ctx, att)
+        sun_safe_mode_axis_fig = plot_sun_safe_mode_axis_figure(
+            times,
+            sun_eci,
+            safe_axis_eci,
+            alignment_angle_deg,
+        )
 
     if ctx.plot_layout == "together":
-        fig = plot_simulation_overview(ctx, times, pos_km, vel_kms, current_attitude_spec, att_rate, rho)
-        save_figure(ctx.logger, fig, plot_paths["overview"], "Simulation plot saved")
+        fig = None
+        if ctx.show_simulation_overview:
+            fig = plot_simulation_overview(ctx, times, pos_km, vel_kms, current_attitude_spec, att_rate, rho)
+            save_figure(ctx.logger, fig, plot_paths["overview"], "Simulation plot saved")
+        if sun_safe_mode_axis_fig is not None:
+            save_figure(
+                ctx.logger,
+                sun_safe_mode_axis_fig,
+                plot_paths["sun_safe_mode_axis"],
+                "Sun safe-mode axis plot saved",
+            )
 
         if show:
             plt.show()
 
-        return fig
+        return fig if fig is not None else (sun_safe_mode_axis_fig or {})
 
-    figures = {
-        "trajectory": plot_orbit_figure(pos_km),
-        "velocity": plot_velocity_figure(times, vel_kms),
-        "attitude": (
+    figures = {}
+    if ctx.show_trajectory_plot:
+        figures["trajectory"] = plot_orbit_figure(pos_km)
+    if ctx.show_velocity_plot:
+        figures["velocity"] = plot_velocity_figure(times, vel_kms)
+    if ctx.show_attitude_plot:
+        figures["attitude"] = (
             plot_component_overlay(
                 times,
                 np.asarray(current_attitude_spec["values"], dtype=float),
@@ -470,8 +591,9 @@ def plot_simulation(
                 list(current_attitude_spec["colors"]),
                 str(current_attitude_spec["title"]),
             )
-        ),
-        "angular_velocity": (
+        )
+    if ctx.show_angular_velocity_plot:
+        figures["angular_velocity"] = (
             plot_component_overlay(
                 times,
                 att_rate,
@@ -488,8 +610,11 @@ def plot_simulation(
                 ["#2563eb", "#f97316", "#059669"],
                 "Angular Velocity Components",
             )
-        ),
-        "rho": (
+        )
+    if sun_safe_mode_axis_fig is not None:
+        figures["sun_safe_mode_axis"] = sun_safe_mode_axis_fig
+    if ctx.show_gyrostat_components:
+        figures["rho"] = (
             plot_component_overlay(
                 times,
                 rho,
@@ -506,18 +631,29 @@ def plot_simulation(
                 ["#7c2d12", "#be123c", "#4338ca"],
                 "Gyrostat Momentum Components",
             )
-        ),
-    }
-    save_figure(ctx.logger, figures["trajectory"], plot_paths["trajectory"], "Trajectory plot saved")
-    save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Velocity plot saved")
-    save_figure(ctx.logger, figures["attitude"], plot_paths["attitude"], "Attitude plot saved")
-    save_figure(
-        ctx.logger,
-        figures["angular_velocity"],
-        plot_paths["angular_velocity"],
-        "Angular velocity plot saved",
-    )
-    save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Gyrostat momentum plot saved")
+        )
+    if "trajectory" in figures:
+        save_figure(ctx.logger, figures["trajectory"], plot_paths["trajectory"], "Trajectory plot saved")
+    if "velocity" in figures:
+        save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Velocity plot saved")
+    if "attitude" in figures:
+        save_figure(ctx.logger, figures["attitude"], plot_paths["attitude"], "Attitude plot saved")
+    if "angular_velocity" in figures:
+        save_figure(
+            ctx.logger,
+            figures["angular_velocity"],
+            plot_paths["angular_velocity"],
+            "Angular velocity plot saved",
+        )
+    if "sun_safe_mode_axis" in figures:
+        save_figure(
+            ctx.logger,
+            figures["sun_safe_mode_axis"],
+            plot_paths["sun_safe_mode_axis"],
+            "Sun safe-mode axis plot saved",
+        )
+    if "rho" in figures:
+        save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Gyrostat momentum plot saved")
 
     if show:
         plt.show()

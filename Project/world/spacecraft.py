@@ -19,7 +19,12 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 
-from world.math import rotation_vector_exponential, skew_symmetric
+from world.math import (
+    R_body_to_inertial,
+    quaternion_from_two_vectors,
+    rotation_vector_exponential,
+    skew_symmetric,
+)
 from world.models.constants import MU_EARTH
 
 class Spacecraft:
@@ -38,6 +43,7 @@ class Spacecraft:
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
         self.mass_deviation_fraction: np.ndarray = np.zeros(3, dtype=float)
         self.rotation_deviation_rad: np.ndarray = np.zeros(3, dtype=float)
+        self.sun_direction_eci: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=float)
         self.desired_spin_axis: np.ndarray = np.array([0.0, 0.0, 1.0], dtype=float)
         self.desired_spin_rate: float = 0.0
         self.J_eff: float = 0.0
@@ -70,6 +76,10 @@ class Spacecraft:
         self.attitude_rate: np.ndarray = np.zeros(3, dtype=float)
 
         self.load_config()
+
+    #################################################################################################
+    # YAML CONFIG LOADING
+    #################################################################################################
 
     @staticmethod
     def _property_value(items: Iterable[Dict], target_name: str, default: object) -> object:
@@ -184,6 +194,12 @@ class Spacecraft:
             [0.0, 0.0, 0.0],
         )
         safe_mode_properties: Iterable[Dict] = cfg.get("safe_mode_properties", [])
+        self.sun_direction_eci = self._property_array(
+            safe_mode_properties,
+            "sun_direction_eci",
+            [1.0, 0.0, 0.0],
+        )
+        self.sun_direction_eci = self.sun_direction_eci / np.linalg.norm(self.sun_direction_eci)
         self.desired_spin_axis = self._property_array(
             safe_mode_properties,
             "desired_spin_axis",
@@ -223,10 +239,11 @@ class Spacecraft:
             true_anomaly_deg=float(self._property_value(initial_conditions, "true_anomaly", 0.0)),
         )
 
-        attitude_init = np.asarray(
-            self._property_value(initial_conditions, "attitude", [1.0, 0.0, 0.0, 0.0]),
-            dtype=float,
-        )
+        attitude_config = self._property_value(initial_conditions, "attitude", [1.0, 0.0, 0.0, 0.0])
+        if isinstance(attitude_config, str) and attitude_config.strip().lower() == "safe_mode":
+            attitude_init = quaternion_from_two_vectors(self.desired_spin_axis, self.sun_direction_eci)
+        else:
+            attitude_init = np.asarray(attitude_config, dtype=float)
         attitude_rate_init = np.asarray(
             self._property_value(initial_conditions, "attitude_rate", [0.0, 0.0, 0.0]),
             dtype=float,
@@ -321,6 +338,10 @@ class Spacecraft:
         position = rotation @ r_pqw
         velocity = rotation @ v_pqw
         return position, velocity
+
+    #################################################################################################
+    # SETTERS, GETTERS
+    #################################################################################################
     
     def set_state(self, state: np.ndarray) -> None:
         """Set the full spacecraft state vector."""
@@ -343,6 +364,22 @@ class Spacecraft:
         self.state[self.Idx["X"]["RHO"]] = self.rho
         return self.state
 
+    #################################################################################################
+    # FRAME TRANSFORMATIONS
+    #################################################################################################
+
+    def body_to_eci_rotation(self) -> np.ndarray:
+        """Return the body-to-ECI rotation matrix from the current attitude."""
+        return R_body_to_inertial(self.attitude)
+
+    def sun_vector_eci(self) -> np.ndarray:
+        """Return the configured sun direction in ECI."""
+        return self.sun_direction_eci
+
+    def sun_vector_body(self) -> np.ndarray:
+        """Return the configured sun direction in body coordinates."""
+        return self.body_to_eci_rotation().T @ self.sun_vector_eci()
+
     def compute_center_of_mass(self) -> np.ndarray:
         """Compute the spacecraft center of mass from loaded component data."""
         if self.mass_vector.size == 0:
@@ -355,7 +392,11 @@ class Spacecraft:
         com = np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0) / total_mass
 
         return com
-    
+
+    #################################################################################################
+    # SIMULATION COMPUTATIONS (INERTIA, DYNAMIC BALANCE)
+    #################################################################################################
+
     def compute_principal_inertia_components(
         self,
         inertia_tensor: np.ndarray | None = None,

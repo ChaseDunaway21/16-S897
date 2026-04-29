@@ -18,6 +18,11 @@ class MonteCarloPlotContext(Protocol):
     plot_layout: str
     attitude_plot_layout: str
     attitude_plot_mode: str
+    show_trajectory_plot: bool
+    show_velocity_plot: bool
+    show_attitude_plot: bool
+    show_angular_velocity_plot: bool
+    show_gyrostat_components: bool
     config_path: Path
     logger: logging.Logger
 
@@ -227,20 +232,23 @@ def plot_monte_carlo_trials(
     attitude_suffix = "quaternion" if ctx.attitude_plot_mode == "quaternion" else "euler"
     summary_root_dir = Path(str(summary.get("root_dir", ctx.config_path.parent / "results")))
     plot_paths = monte_carlo_plot_paths(ctx, summary_root_dir, save_path, attitude_suffix)
-    plot_groups = [
-        {
+    plot_groups = []
+    if ctx.show_trajectory_plot:
+        plot_groups.append({
             "title": "Position Components",
             "labels": ["x [m]", "y [m]", "z [m]"],
             "colors": ["#2563eb", "#1d4ed8", "#1e40af"],
             "trial_series": position_trials,
-        },
-        {
+        })
+    if ctx.show_velocity_plot:
+        plot_groups.append({
             "title": "Velocity Components",
             "labels": ["vx [m/s]", "vy [m/s]", "vz [m/s]"],
             "colors": ["#f59e0b", "#d97706", "#b45309"],
             "trial_series": velocity_trials,
-        },
-        {
+        })
+    if ctx.show_attitude_plot:
+        plot_groups.append({
             "title": "Quaternion Components" if ctx.attitude_plot_mode == "quaternion" else "Euler Angle Components",
             "labels": (
                 ["q0 [-]", "q1 [-]", "q2 [-]", "q3 [-]"]
@@ -251,24 +259,27 @@ def plot_monte_carlo_trials(
             "trial_series": attitude_trials,
             "overlay": ctx.attitude_plot_layout == "overlay",
             "ylabel": "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]",
-        },
-        {
+        })
+    if ctx.show_angular_velocity_plot:
+        plot_groups.append({
             "title": "Angular Velocity Components",
             "labels": ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"],
             "colors": ["#2563eb", "#f97316", "#059669"],
             "trial_series": omega_trials,
             "overlay": ctx.attitude_plot_layout == "overlay",
             "ylabel": "angular velocity [rad/s]",
-        },
-        {
+        })
+    if ctx.show_gyrostat_components:
+        plot_groups.append({
             "title": "Gyrostat Momentum Components",
             "labels": ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
             "colors": ["#7c2d12", "#be123c", "#4338ca"],
             "trial_series": rho_trials,
             "overlay": ctx.attitude_plot_layout == "overlay",
             "ylabel": "rho [kg m^2/s]",
-        },
-    ]
+        })
+    if not plot_groups:
+        return {}
 
     if ctx.plot_layout == "together":
         fig = plot_monte_carlo_overview(plot_groups, line_alpha)
@@ -279,22 +290,25 @@ def plot_monte_carlo_trials(
 
         return fig
 
-    figures = {
-        "position": plot_monte_carlo_component_stack(
+    figures = {}
+    if ctx.show_trajectory_plot:
+        figures["position"] = plot_monte_carlo_component_stack(
             position_trials,
             ["x [m]", "y [m]", "z [m]"],
             ["#2563eb", "#1d4ed8", "#1e40af"],
             "Position Components",
             line_alpha,
-        ),
-        "velocity": plot_monte_carlo_component_stack(
+        )
+    if ctx.show_velocity_plot:
+        figures["velocity"] = plot_monte_carlo_component_stack(
             velocity_trials,
             ["vx [m/s]", "vy [m/s]", "vz [m/s]"],
             ["#f59e0b", "#d97706", "#b45309"],
             "Velocity Components",
             line_alpha,
-        ),
-        "attitude": (
+        )
+    if ctx.show_attitude_plot:
+        figures["attitude"] = (
             plot_monte_carlo_component_overlay(
                 attitude_trials,
                 (
@@ -319,8 +333,9 @@ def plot_monte_carlo_trials(
                 "Quaternion Components" if ctx.attitude_plot_mode == "quaternion" else "Euler Angle Components",
                 line_alpha,
             )
-        ),
-        "angular_velocity": (
+        )
+    if ctx.show_angular_velocity_plot:
+        figures["angular_velocity"] = (
             plot_monte_carlo_component_overlay(
                 omega_trials,
                 ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"],
@@ -337,8 +352,9 @@ def plot_monte_carlo_trials(
                 "Angular Velocity Components",
                 line_alpha,
             )
-        ),
-        "rho": (
+        )
+    if ctx.show_gyrostat_components:
+        figures["rho"] = (
             plot_monte_carlo_component_overlay(
                 rho_trials,
                 ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
@@ -355,19 +371,23 @@ def plot_monte_carlo_trials(
                 "Gyrostat Momentum Components",
                 line_alpha,
             )
-        ),
-    }
-    save_figure(ctx.logger, figures["position"], plot_paths["position"], "Monte Carlo position plot saved", dpi=180)
-    save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Monte Carlo velocity plot saved", dpi=180)
-    save_figure(ctx.logger, figures["attitude"], plot_paths["attitude"], "Monte Carlo attitude plot saved", dpi=180)
-    save_figure(
-        ctx.logger,
-        figures["angular_velocity"],
-        plot_paths["angular_velocity"],
-        "Monte Carlo angular velocity plot saved",
-        dpi=180,
-    )
-    save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Monte Carlo gyrostat momentum plot saved", dpi=180)
+        )
+    if "position" in figures:
+        save_figure(ctx.logger, figures["position"], plot_paths["position"], "Monte Carlo position plot saved", dpi=180)
+    if "velocity" in figures:
+        save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Monte Carlo velocity plot saved", dpi=180)
+    if "attitude" in figures:
+        save_figure(ctx.logger, figures["attitude"], plot_paths["attitude"], "Monte Carlo attitude plot saved", dpi=180)
+    if "angular_velocity" in figures:
+        save_figure(
+            ctx.logger,
+            figures["angular_velocity"],
+            plot_paths["angular_velocity"],
+            "Monte Carlo angular velocity plot saved",
+            dpi=180,
+        )
+    if "rho" in figures:
+        save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Monte Carlo gyrostat momentum plot saved", dpi=180)
 
     if show:
         plt.show()

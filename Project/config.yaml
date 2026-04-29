@@ -11,7 +11,7 @@ simulation_properties:
     value: 0.1 # seconds
 
   - name: max_simulation_time
-    value: 6000.0 # seconds
+    value: 600.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -43,24 +43,27 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: [1.0, 0.0, 0.0, 0.0] # quaternion (w x y z)
+    value: safe_mode # align desired_spin_axis body vector to sun_direction_eci
 
   - name: attitude_rate
-    value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
+    value: [0, 0, 1] # rad/s (10 rpm), This applies to non-montecarlo runs
     nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
-    deviation: [0.9, 0.9, 0.9] # rad/s
+    deviation: [0.1, 0.1, 0.1] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
 safe_mode_properties:
 
+  - name: sun_direction_eci
+    value: [1.0, 0.0, 0.0] # unit vector in ECI
+
   - name: desired_spin_axis
-    value: [0.0, 0.0, 1.0] # body-frame solar normal, +z
+    value: [0.0, 0.0, 1.0] # body-frame, solar normal is just +z for ARGUS
 
   - name: desired_spin_rate
     value: 1.0407409737537963 # rad/s
 
   - name: J_eff
-    value: 1.2 # relative to principal J33 (i.e. J_eff = 1.2 means J_eff is 20% larger than the largest principal moment of inertia))
+    value: 1.2 # relative to principal J33 (i.e. J_eff = 1.2 means J_eff is 20% larger than the largest principal moment of inertia)
 
 physical_properties:
 
@@ -213,3 +216,27 @@ plotting_properties:
 
   - name: attitude_representation
     value: euler # quaternion or euler
+
+  - name: show_simulation_overview
+    value: True
+
+  - name: show_trajectory_plot
+    value: True
+
+  - name: show_velocity_plot
+    value: True
+
+  - name: show_attitude_plot
+    value: True
+
+  - name: show_angular_velocity_plot
+    value: True
+
+  - name: show_gyrostat_components
+    value: False # show rho components in simulation and Monte Carlo plots
+
+  - name: show_sun_safe_mode_axis_plot
+    value: True
+
+  - name: show_momentum_sphere_plot
+    value: True

@@ -36,7 +36,8 @@ def main() -> None:
 
 	result = sim.run()
 	sim.plot_simulation(result, show=False)
-	sim.plot_momentum_sphere(result, show=False)
+	if sim.show_momentum_sphere_plot:
+		sim.plot_momentum_sphere(result, show=False)
 
 	print("Simulation complete")
 	print(f"Orbit period: {result['orbit_period_s']:.2f} s")
