@@ -191,6 +191,11 @@ class Simulator:
             "show_sensor_plot",
             True,
         )
+        self.show_camera_measurement_plot = self._property_bool(
+            plotting_properties,
+            "show_camera_measurement_plot",
+            True,
+        )
         self.show_momentum_sphere_plot = self._property_bool(
             plotting_properties,
             "show_momentum_sphere_plot",
@@ -256,6 +261,12 @@ class Simulator:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @staticmethod
+    def _measurement_array(measurement: np.ndarray | None) -> np.ndarray:
+        if measurement is None:
+            return np.full(3, np.nan, dtype=float)
+        return np.asarray(measurement, dtype=float).reshape(-1)
 
     def _sensor_update_period(
         self, sensor_name: str, sensor_cfg: dict, default_rate_hz: float
@@ -355,6 +366,7 @@ class Simulator:
                 covariance=visual_camera_cfg.get("covariance"),
                 rng=np.random.default_rng(base_seed + 5),
             )
+            # For now the target is just the center of the Earth
             self.sensor_targets["visual_camera"] = np.asarray(
                 visual_camera_cfg.get("target_position_eci", [0.0, 0.0, 0.0]),
                 dtype=float,
@@ -397,10 +409,7 @@ class Simulator:
             measurement = self._sensor_measurement(
                 sensor_name, sensor_model, state, time_s
             )
-            if measurement is None:
-                measurement_array = np.full(3, np.nan, dtype=float)
-            else:
-                measurement_array = np.asarray(measurement, dtype=float).reshape(-1)
+            measurement_array = self._measurement_array(measurement)
 
             self.sensor_records[sensor_name]["times_s"].append(float(time_s))
             self.sensor_records[sensor_name]["measurements"].append(measurement_array)

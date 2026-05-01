@@ -4,13 +4,25 @@ Runs the simulation of the ARGUS Satellite
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import yaml
 
 from simulator import Simulator
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the ARGUS simulation")
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="display plots interactively after saving them",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     config_path = Path(__file__).with_name("config.yaml")
     with config_path.open("r", encoding="utf-8") as file:
         cfg = yaml.safe_load(file) or {}
@@ -25,7 +37,7 @@ def main() -> None:
 
     if monte_carlo:
         summary = sim.run_monte_carlo()
-        sim.plot_monte_carlo_trials(summary, show=False)
+        sim.plot_monte_carlo_trials(summary, show=args.show)
         print("Monte Carlo complete")
         print(f"Root directory: {summary['root_dir']}")
         print(f"Trials: {summary['trials']}")
@@ -33,9 +45,9 @@ def main() -> None:
         return
 
     result = sim.run()
-    sim.plot_simulation(result, show=False)
+    sim.plot_simulation(result, show=args.show)
     if sim.show_momentum_sphere_plot:
-        sim.plot_momentum_sphere(result, show=False)
+        sim.plot_momentum_sphere(result, show=args.show)
 
     print("Simulation complete")
     print(f"Orbit period: {result['orbit_period_s']:.2f} s")

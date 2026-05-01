@@ -35,6 +35,8 @@ class SimulationPlotContext(Protocol):
     show_gyrostat_components: bool
     show_sun_safe_mode_axis_plot: bool
     show_sensor_plot: bool
+    show_camera_measurement_plot: bool
+    sensor_targets: Mapping[str, np.ndarray]
     spacecraft: Any
     output_dir: Path | None
     config_path: Path
@@ -123,6 +125,7 @@ def simulation_plot_paths(
             "rho": root_dir / "simulation_rho.png",
             "sun_safe_mode_axis": root_dir / "simulation_sun_safe_mode_axis.png",
             "sensors": root_dir / "simulation_sensors.png",
+            "camera_measurements": root_dir / "simulation_camera_measurements.png",
         }
 
     base_path = Path(save_path)
@@ -136,11 +139,15 @@ def simulation_plot_paths(
                 "sensors": base_path.with_name(
                     f"{base_path.stem}_sensors{base_path.suffix}"
                 ),
+                "camera_measurements": base_path.with_name(
+                    f"{base_path.stem}_camera_measurements{base_path.suffix}"
+                ),
             }
         return {
             "overview": base_path,
             "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
             "sensors": base_path / "simulation_sensors.png",
+            "camera_measurements": base_path / "simulation_camera_measurements.png",
         }
 
     if base_path.suffix:
@@ -155,6 +162,7 @@ def simulation_plot_paths(
             "rho": root_dir / f"{prefix}_rho.png",
             "sun_safe_mode_axis": root_dir / f"{prefix}_sun_safe_mode_axis.png",
             "sensors": root_dir / f"{prefix}_sensors.png",
+            "camera_measurements": root_dir / f"{prefix}_camera_measurements.png",
         }
 
     return {
@@ -165,6 +173,7 @@ def simulation_plot_paths(
         "rho": base_path / "simulation_rho.png",
         "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
         "sensors": base_path / "simulation_sensors.png",
+        "camera_measurements": base_path / "simulation_camera_measurements.png",
     }
 
 
@@ -183,7 +192,7 @@ def orbit_extent_points(pos_km: np.ndarray) -> np.ndarray:
     return np.vstack((np.asarray(pos_km, dtype=float), earth_extent_points))
 
 
-def plot_earth_sphere(ax: plt.Axes) -> None:
+def plot_earth_sphere(ax: plt.Axes, alpha: float = 1.0) -> None:
     u = np.linspace(0.0, 2.0 * np.pi, 80)
     v = np.linspace(0.0, np.pi, 40)
     uu, vv = np.meshgrid(u, v)
@@ -195,7 +204,7 @@ def plot_earth_sphere(ax: plt.Axes) -> None:
         y,
         z,
         color="#2563eb",
-        alpha=1.00,
+        alpha=alpha,
         edgecolor="none",
         antialiased=True,
         shade=True,
@@ -246,6 +255,119 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     ax.set_zlabel("z [km]")
     ax.legend(loc="upper right")
     set_equal_orbit_axes(ax, orbit_extent_points(pos_km))
+    fig.tight_layout()
+    return fig
+
+
+def camera_measurement_state_indices(
+    times: np.ndarray,
+    sensor_history: Mapping[str, Mapping[str, object]],
+) -> np.ndarray:
+    camera_data = sensor_history.get("visual_camera")
+    if camera_data is None:
+        return np.empty(0, dtype=int)
+
+    camera_times = np.asarray(camera_data["times_s"], dtype=float)
+    camera_measurements = np.asarray(camera_data["measurements"], dtype=float)
+    if camera_times.size == 0 or camera_measurements.size == 0:
+        return np.empty(0, dtype=int)
+    if camera_measurements.ndim == 1:
+        camera_measurements = camera_measurements[:, np.newaxis]
+
+    valid_times = camera_times[np.isfinite(camera_measurements).all(axis=1)]
+    if valid_times.size == 0:
+        return np.empty(0, dtype=int)
+
+    indices = np.searchsorted(times, valid_times)
+    indices = np.clip(indices, 0, times.size - 1)
+    previous_indices = np.maximum(indices - 1, 0)
+    use_previous = np.abs(times[previous_indices] - valid_times) < np.abs(
+        times[indices] - valid_times
+    )
+    indices[use_previous] = previous_indices[use_previous]
+    return np.unique(indices)
+
+
+def plot_camera_measurement_figure(
+    times: np.ndarray,
+    pos_km: np.ndarray,
+    sensor_history: Mapping[str, Mapping[str, object]],
+    target_position_eci_km: np.ndarray,
+) -> plt.Figure | None:
+    measurement_indices = camera_measurement_state_indices(times, sensor_history)
+    if measurement_indices.size == 0:
+        return None
+
+    max_vectors = 150
+    if measurement_indices.size > max_vectors:
+        measurement_indices = measurement_indices[
+            np.linspace(0, measurement_indices.size - 1, max_vectors, dtype=int)
+        ]
+
+    camera_positions = pos_km[measurement_indices]
+    target_km = np.asarray(target_position_eci_km, dtype=float)
+    directions = target_km - camera_positions
+    direction_norms = np.linalg.norm(directions, axis=1, keepdims=True)
+    direction_norms[direction_norms == 0.0] = 1.0
+    unit_directions = directions / direction_norms
+    vector_length = 0.25 * EARTH_RADIUS_KM
+
+    fig = plt.figure(figsize=(10, 9), facecolor=FIGURE_FACE_COLOR)
+    ax = fig.add_subplot(1, 1, 1, projection="3d")
+    ax.set_facecolor(AXIS_FACE_COLOR)
+    plot_earth_sphere(ax, alpha=0.12)
+    ax.plot(
+        pos_km[:, 0],
+        pos_km[:, 1],
+        pos_km[:, 2],
+        linewidth=1.2,
+        color="#f97316",
+        alpha=0.65,
+        label="orbit",
+    )
+    ax.scatter(
+        camera_positions[:, 0],
+        camera_positions[:, 1],
+        camera_positions[:, 2],
+        color="#facc15",
+        edgecolors="#78350f",
+        linewidths=0.5,
+        s=22,
+        label="camera measurement",
+        zorder=4,
+    )
+    ax.quiver(
+        camera_positions[:, 0],
+        camera_positions[:, 1],
+        camera_positions[:, 2],
+        unit_directions[:, 0],
+        unit_directions[:, 1],
+        unit_directions[:, 2],
+        length=vector_length,
+        normalize=False,
+        color="#dc2626",
+        linewidth=0.9,
+        alpha=0.85,
+        label="bearing to target",
+    )
+    ax.scatter(
+        target_km[0],
+        target_km[1],
+        target_km[2],
+        color="#111827",
+        edgecolors="white",
+        linewidths=0.7,
+        s=60,
+        label="target",
+        zorder=5,
+    )
+    ax.set_title("Camera Measurements Toward Target (ECI)")
+    ax.set_xlabel("x [km]")
+    ax.set_ylabel("y [km]")
+    ax.set_zlabel("z [km]")
+    ax.legend(loc="upper right")
+    extent_points = np.vstack((pos_km, target_km[np.newaxis, :]))
+    set_equal_orbit_axes(ax, orbit_extent_points(extent_points))
     fig.tight_layout()
     return fig
 
@@ -740,6 +862,21 @@ def plot_simulation(
     if ctx.show_sensor_plot and isinstance(sensor_history, Mapping):
         sensor_fig = plot_sensor_measurements(sensor_history, ctx.sensor_plot_layout)
 
+    camera_measurement_fig = None
+    if ctx.show_camera_measurement_plot and isinstance(sensor_history, Mapping):
+        target_position_eci_km = (
+            np.asarray(
+                ctx.sensor_targets.get("visual_camera", np.zeros(3)), dtype=float
+            )
+            / 1_000.0
+        )
+        camera_measurement_fig = plot_camera_measurement_figure(
+            times,
+            pos_km,
+            sensor_history,
+            target_position_eci_km,
+        )
+
     if ctx.plot_layout == "together":
         fig = None
         if ctx.show_simulation_overview:
@@ -763,11 +900,22 @@ def plot_simulation(
                 plot_paths["sensors"],
                 "Sensor plot saved",
             )
+        if camera_measurement_fig is not None:
+            save_figure(
+                ctx.logger,
+                camera_measurement_fig,
+                plot_paths["camera_measurements"],
+                "Camera measurement plot saved",
+            )
 
         if show:
             plt.show()
 
-        return fig if fig is not None else (sun_safe_mode_axis_fig or sensor_fig or {})
+        return (
+            fig
+            if fig is not None
+            else (sun_safe_mode_axis_fig or sensor_fig or camera_measurement_fig or {})
+        )
 
     figures = {}
     if ctx.show_trajectory_plot:
@@ -818,6 +966,8 @@ def plot_simulation(
         figures["sun_safe_mode_axis"] = sun_safe_mode_axis_fig
     if sensor_fig is not None:
         figures["sensors"] = sensor_fig
+    if camera_measurement_fig is not None:
+        figures["camera_measurements"] = camera_measurement_fig
     if ctx.show_gyrostat_components:
         figures["rho"] = (
             plot_component_overlay(
@@ -885,6 +1035,13 @@ def plot_simulation(
             figures["sensors"],
             plot_paths["sensors"],
             "Sensor plot saved",
+        )
+    if "camera_measurements" in figures:
+        save_figure(
+            ctx.logger,
+            figures["camera_measurements"],
+            plot_paths["camera_measurements"],
+            "Camera measurement plot saved",
         )
 
     if show:

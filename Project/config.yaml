@@ -237,8 +237,8 @@ sensor_properties:
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # unit-vector covariance
 
   visual_camera:
-    enabled: False
-    update_rate_hz: 0.1
+    enabled: True
+    update_rate_hz: 0.01
     boresight_body: [1.0, 0.0, 0.0]
     target_position_eci: [0.0, 0.0, 0.0] # m
     field_of_view_deg: 75.0
@@ -280,6 +280,9 @@ plotting_properties:
     value: True
 
   - name: show_sensor_plot
+    value: True
+
+  - name: show_camera_measurement_plot
     value: True
 
   - name: show_momentum_sphere_plot

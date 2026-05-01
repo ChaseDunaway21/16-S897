@@ -5,3 +5,4 @@ pyyaml
 scipy
 spiceypy
 ppigrf
+cyipopt
