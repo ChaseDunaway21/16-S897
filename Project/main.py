@@ -42,6 +42,8 @@ def main() -> None:
     print(f"Duration: {result['sim_duration_s']:.2f} s")
     print(f"Steps: {result['num_steps']}")
     print(f"Log file: {result['log_file']}")
+    if result.get("sensor_history_file") is not None:
+        print(f"Sensor data: {result['sensor_history_file']}")
     print("Final spacecraft state (SI units):")
     print(f"  position [m]: {sim.spacecraft.position_eci}")
     print(f"  velocity [m/s]: {sim.spacecraft.velocity_eci}")

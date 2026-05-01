@@ -43,15 +43,18 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: safe_mode # align desired_spin_axis body vector to sun_direction_eci
+    value: random # a specified quaternion, safe_mode, or random
 
   - name: attitude_rate
-    value: [0, 0, 1] # rad/s (10 rpm), This applies to non-montecarlo runs
+    value: [-0.1, -0.1, 0.5] # rad/s (10 rpm), This applies to non-montecarlo runs
     nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
     deviation: [0.1, 0.1, 0.1] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
 safe_mode_properties:
+
+  - name: enabled
+    value: True # set False to disable safe-mode attitude initialization and gyrostat rho
 
   - name: sun_direction_eci
     value: [1.0, 0.0, 0.0] # unit vector in ECI
@@ -184,7 +187,7 @@ physical_properties:
 inertia_properties:
 
   - name: augment_inertia
-    value: True
+    value: False
 
   - name: inertia_seed
     value: 42
@@ -207,22 +210,37 @@ integration_properties:
     value: rk4
 
 sensor_properties:
+  enabled: True
+  update_rate_hz: 1.0
+  seed: 42
 
   magnetometer:
-    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # T^2
+    enabled: True
+    update_rate_hz: 1.0
+    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # uT^2
 
   gyroscope:
+    enabled: True
+    update_rate_hz: 5.0
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # (rad/s)^2
     bias: [0.0, 0.0, 0.0] # rad/s
 
   accelerometer:
+    enabled: False
+    update_rate_hz: 1.0
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # (m/s^2)^2
     bias: [0.0, 0.0, 0.0] # m/s^2
 
   sun_sensor:
+    enabled: True
+    update_rate_hz: 0.1
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # unit-vector covariance
 
   visual_camera:
+    enabled: False
+    update_rate_hz: 0.1
+    boresight_body: [1.0, 0.0, 0.0]
+    target_position_eci: [0.0, 0.0, 0.0] # m
     field_of_view_deg: 75.0
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # bearing-vector covariance
 
@@ -233,6 +251,9 @@ plotting_properties:
 
   - name: attitude_plot_layout
     value: overlay # overlay or stacked; applies to attitude and angular velocity plots
+
+  - name: sensor_plot_layout
+    value: overlay # overlay or stacked
 
   - name: attitude_representation
     value: euler # quaternion or euler
@@ -253,9 +274,12 @@ plotting_properties:
     value: True
 
   - name: show_gyrostat_components
-    value: False # show rho components in simulation and Monte Carlo plots
+    value: True # show rho components in simulation and Monte Carlo plots
 
   - name: show_sun_safe_mode_axis_plot
+    value: True
+
+  - name: show_sensor_plot
     value: True
 
   - name: show_momentum_sphere_plot

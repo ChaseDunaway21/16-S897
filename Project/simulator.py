@@ -20,8 +20,11 @@ from visualization import (
     plot_monte_carlo_trials as build_monte_carlo_plots,
     plot_simulation as build_simulation_plots,
 )
+from sensors import Accelerometer, Gyroscope, Magnetometer, SunSensor, VisualCamera
 from world.models.constants import MU_EARTH
 from world.dynamics import integrate_dynamics
+import world.models.gravity as gravity
+from world.models.sun import SunModel
 from world.spacecraft import Spacecraft
 
 
@@ -52,6 +55,7 @@ def _run_single_monte_carlo_trial(
         "output_dir": str(run_dir),
         "log_file": str(result["log_file"]),
         "state_file": str(state_file),
+        "sensor_file": result.get("sensor_history_file"),
         "num_steps": int(result["num_steps"]),
         "final_position_m": final_state[idx["POS_ECI"]].tolist(),
         "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
@@ -135,6 +139,15 @@ class Simulator:
             {"overlay", "stacked"},
             "plotting_properties.attitude_plot_layout",
         )
+        self.sensor_plot_layout = self._validated_option(
+            self._property_value(
+                plotting_properties,
+                "sensor_plot_layout",
+                "overlay",
+            ),
+            {"overlay", "stacked"},
+            "plotting_properties.sensor_plot_layout",
+        )
         self.attitude_plot_mode = self._validated_option(
             self._property_value(
                 plotting_properties,
@@ -173,6 +186,11 @@ class Simulator:
             "show_sun_safe_mode_axis_plot",
             True,
         )
+        self.show_sensor_plot = self._property_bool(
+            plotting_properties,
+            "show_sensor_plot",
+            True,
+        )
         self.show_momentum_sphere_plot = self._property_bool(
             plotting_properties,
             "show_momentum_sphere_plot",
@@ -194,6 +212,7 @@ class Simulator:
                 "Single non-ideal run uses deterministic sampled parameters with seed=%d",
                 self.single_run_seed,
             )
+        self._setup_sensors()
 
     @staticmethod
     def _property_value(
@@ -229,6 +248,197 @@ class Simulator:
             valid_list = ", ".join(sorted(valid_options))
             raise ValueError(f"{field_name} must be one of: {valid_list}")
         return option
+
+    @staticmethod
+    def _config_bool(value: object, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    def _sensor_update_period(
+        self, sensor_name: str, sensor_cfg: dict, default_rate_hz: float
+    ) -> float:
+        update_rate_hz = float(sensor_cfg.get("update_rate_hz", default_rate_hz))
+        if update_rate_hz <= 0.0:
+            raise ValueError(
+                f"sensor_properties.{sensor_name}.update_rate_hz must be positive"
+            )
+        return 1.0 / update_rate_hz
+
+    def _setup_sensors(self) -> None:
+        sensor_properties = self.cfg.get("sensor_properties", {}) or {}
+        self.sensor_models: dict[str, object] = {}
+        self.sensor_update_periods: dict[str, float] = {}
+        self.sensor_next_update_times: dict[str, float] = {}
+        self.sensor_records: dict[str, dict[str, list]] = {}
+        self.sensor_targets: dict[str, np.ndarray] = {}
+
+        if not isinstance(sensor_properties, dict):
+            return
+        if not self._config_bool(sensor_properties.get("enabled"), False):
+            return
+
+        default_rate_hz = float(sensor_properties.get("update_rate_hz", 1.0))
+        if default_rate_hz <= 0.0:
+            raise ValueError("sensor_properties.update_rate_hz must be positive")
+        base_seed = int(
+            sensor_properties.get(
+                "seed", 42 if self.single_run_seed is None else self.single_run_seed
+            )
+        )
+
+        magnetometer_cfg = sensor_properties.get("magnetometer", {}) or {}
+        if self._config_bool(magnetometer_cfg.get("enabled"), True):
+            self.sensor_models["magnetometer"] = Magnetometer(
+                covariance=magnetometer_cfg.get("covariance"),
+                rng=np.random.default_rng(base_seed + 1),
+            )
+            self.sensor_update_periods["magnetometer"] = self._sensor_update_period(
+                "magnetometer", magnetometer_cfg, default_rate_hz
+            )
+
+        gyroscope_cfg = sensor_properties.get("gyroscope", {}) or {}
+        if self._config_bool(gyroscope_cfg.get("enabled"), True):
+            self.sensor_models["gyroscope"] = Gyroscope(
+                covariance=gyroscope_cfg.get("covariance"),
+                bias=gyroscope_cfg.get("bias"),
+                rng=np.random.default_rng(base_seed + 2),
+            )
+            self.sensor_update_periods["gyroscope"] = self._sensor_update_period(
+                "gyroscope", gyroscope_cfg, default_rate_hz
+            )
+
+        accelerometer_cfg = sensor_properties.get("accelerometer", {}) or {}
+        if self._config_bool(accelerometer_cfg.get("enabled"), True):
+            self.sensor_models["accelerometer"] = Accelerometer(
+                covariance=accelerometer_cfg.get("covariance"),
+                bias=accelerometer_cfg.get("bias"),
+                rng=np.random.default_rng(base_seed + 3),
+            )
+            self.sensor_update_periods["accelerometer"] = self._sensor_update_period(
+                "accelerometer", accelerometer_cfg, default_rate_hz
+            )
+
+        sun_sensor_cfg = sensor_properties.get("sun_sensor", {}) or {}
+        if self._config_bool(sun_sensor_cfg.get("enabled"), True):
+            sun_model = SunModel(
+                direction_eci=self.spacecraft.sun_direction_eci,
+                use_spice=self._config_bool(sun_sensor_cfg.get("use_spice"), False),
+                require_spice=self._config_bool(
+                    sun_sensor_cfg.get("require_spice"), False
+                ),
+            )
+            self.sensor_models["sun_sensor"] = SunSensor(
+                sun_model=sun_model,
+                covariance=sun_sensor_cfg.get("covariance"),
+                rng=np.random.default_rng(base_seed + 4),
+                return_none_if_eclipsed=self._config_bool(
+                    sun_sensor_cfg.get("return_none_if_eclipsed"), True
+                ),
+            )
+            self.sensor_update_periods["sun_sensor"] = self._sensor_update_period(
+                "sun_sensor", sun_sensor_cfg, default_rate_hz
+            )
+
+        visual_camera_cfg = sensor_properties.get("visual_camera", {}) or {}
+        if self._config_bool(visual_camera_cfg.get("enabled"), True):
+            self.sensor_models["visual_camera"] = VisualCamera(
+                boresight_body=np.asarray(
+                    visual_camera_cfg.get("boresight_body", [1.0, 0.0, 0.0]),
+                    dtype=float,
+                ),
+                field_of_view_rad=np.deg2rad(
+                    float(visual_camera_cfg.get("field_of_view_deg", 75.0))
+                ),
+                covariance=visual_camera_cfg.get("covariance"),
+                rng=np.random.default_rng(base_seed + 5),
+            )
+            self.sensor_targets["visual_camera"] = np.asarray(
+                visual_camera_cfg.get("target_position_eci", [0.0, 0.0, 0.0]),
+                dtype=float,
+            )
+            self.sensor_update_periods["visual_camera"] = self._sensor_update_period(
+                "visual_camera", visual_camera_cfg, default_rate_hz
+            )
+
+        enabled = ", ".join(self.sensor_models) if self.sensor_models else "none"
+        self.logger.info("Enabled sensors: %s", enabled)
+
+    def _reset_sensor_records(self) -> None:
+        self.sensor_records = {
+            name: {"times_s": [], "measurements": []} for name in self.sensor_models
+        }
+        self.sensor_next_update_times = {name: 0.0 for name in self.sensor_models}
+
+    def _sensor_measurement(
+        self, sensor_name: str, sensor_model: object, state: np.ndarray, time_s: float
+    ) -> np.ndarray | None:
+        if sensor_name == "accelerometer":
+            acceleration_eci = gravity.acceleration(state[self.idx["POS_ECI"]])
+            return sensor_model.get_measurement(
+                state, self.idx, time_s, acceleration_eci=acceleration_eci
+            )
+        if sensor_name == "visual_camera":
+            return sensor_model.get_measurement(
+                state,
+                self.idx,
+                time_s,
+                target_position_eci=self.sensor_targets["visual_camera"],
+            )
+        return sensor_model.get_measurement(state, self.idx, time_s)
+
+    def _record_due_sensor_measurements(self, state: np.ndarray, time_s: float) -> None:
+        for sensor_name, sensor_model in self.sensor_models.items():
+            if time_s + 1e-12 < self.sensor_next_update_times[sensor_name]:
+                continue
+
+            measurement = self._sensor_measurement(
+                sensor_name, sensor_model, state, time_s
+            )
+            if measurement is None:
+                measurement_array = np.full(3, np.nan, dtype=float)
+            else:
+                measurement_array = np.asarray(measurement, dtype=float).reshape(-1)
+
+            self.sensor_records[sensor_name]["times_s"].append(float(time_s))
+            self.sensor_records[sensor_name]["measurements"].append(measurement_array)
+
+            while self.sensor_next_update_times[sensor_name] <= time_s + 1e-12:
+                self.sensor_next_update_times[sensor_name] += (
+                    self.sensor_update_periods[sensor_name]
+                )
+
+    def _sensor_history_arrays(self) -> dict[str, dict[str, np.ndarray]]:
+        sensor_history = {}
+        for sensor_name, records in self.sensor_records.items():
+            measurements = records["measurements"]
+            if measurements:
+                measurement_array = np.asarray(measurements, dtype=float)
+            else:
+                measurement_array = np.empty((0, 3), dtype=float)
+            sensor_history[sensor_name] = {
+                "times_s": np.asarray(records["times_s"], dtype=float),
+                "measurements": measurement_array,
+            }
+        return sensor_history
+
+    def _save_sensor_history(
+        self, sensor_history: dict[str, dict[str, np.ndarray]]
+    ) -> Path | None:
+        if not sensor_history:
+            return None
+
+        payload = {}
+        for sensor_name, sensor_data in sensor_history.items():
+            payload[f"{sensor_name}_times_s"] = sensor_data["times_s"]
+            payload[f"{sensor_name}_measurements"] = sensor_data["measurements"]
+
+        sensor_file = self.output_dir / "sensor_history.npz"
+        np.savez_compressed(sensor_file, **payload)
+        self.logger.info("Sensor history saved: %s", sensor_file)
+        return sensor_file
 
     @staticmethod
     def _sample_with_uncertainty(
@@ -301,6 +511,10 @@ class Simulator:
             trial_cfg["inertia_properties"] = inertia_properties
         else:
             inertia_seed["value"] = seed + trial_index
+
+        sensor_properties = trial_cfg.get("sensor_properties", {}) or {}
+        if isinstance(sensor_properties, dict) and "seed" in sensor_properties:
+            sensor_properties["seed"] = seed + trial_index
 
         return trial_cfg
 
@@ -397,7 +611,7 @@ class Simulator:
             sys.stdout.write("\n")
         sys.stdout.flush()
 
-    def run(self, show_progress: bool = True) -> dict[str, np.ndarray | float | int]:
+    def run(self, show_progress: bool = True) -> dict[str, object]:
         state = self.spacecraft.get_state().astype(float, copy=True)
 
         orbit_period = self._orbit_period_seconds(state[self.idx["POS_ECI"]])
@@ -411,28 +625,34 @@ class Simulator:
             self.integration_method,
         )
         rho = state[self.idx["RHO"]]
-        J_principal, _ = self.spacecraft.compute_principal_inertia_components()
-        rho_message = (
-            f"Dynamic balance rho (Jeff = J_33 * {self.spacecraft.J_33_multiplier:.6g}): "
-            f"{self._vector_to_string(rho)} [kg m^2/s] "
-            f" | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
-        )
+        if self.spacecraft.safe_mode_enabled:
+            rho_message = (
+                f"Dynamic balance rho (Jeff = J_33 * {self.spacecraft.J_33_multiplier:.6g}): "
+                f"{self._vector_to_string(rho)} [kg m^2/s] "
+                f" | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
+            )
+        else:
+            rho_message = (
+                f"Safe mode disabled; gyrostat rho: {self._vector_to_string(rho)} "
+                f"[kg m^2/s] | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
+            )
         self.logger.info(rho_message)
         if show_progress or self.spacecraft.debug:
             print(rho_message)
-        desired_omega = (
-            self.spacecraft.desired_spin_rate * self.spacecraft.desired_spin_axis
-        )
-        initial_omega = state[self.idx["ATTITUDE_RATE"]]
-        omega_error = initial_omega - desired_omega
-        if np.linalg.norm(omega_error) > 1e-9:
-            self.logger.warning(
-                "Initial omega differs from dynamic-balance omega by %s rad/s; "
-                "rho is balanced for desired omega %s rad/s, not the current initial omega %s rad/s",
-                self._vector_to_string(omega_error),
-                self._vector_to_string(desired_omega),
-                self._vector_to_string(initial_omega),
+        if self.spacecraft.safe_mode_enabled:
+            desired_omega = (
+                self.spacecraft.desired_spin_rate * self.spacecraft.desired_spin_axis
             )
+            initial_omega = state[self.idx["ATTITUDE_RATE"]]
+            omega_error = initial_omega - desired_omega
+            if np.linalg.norm(omega_error) > 1e-9:
+                self.logger.warning(
+                    "Initial omega differs from dynamic-balance omega by %s rad/s; "
+                    "rho is balanced for desired omega %s rad/s, not the current initial omega %s rad/s",
+                    self._vector_to_string(omega_error),
+                    self._vector_to_string(desired_omega),
+                    self._vector_to_string(initial_omega),
+                )
         self._log_state_components(
             "Initial state", state, step=0, total_steps=num_steps, time_s=0.0
         )
@@ -440,6 +660,8 @@ class Simulator:
         times = np.zeros(num_steps + 1, dtype=float)
         history = np.zeros((num_steps + 1, state.size), dtype=float)
         history[0] = state
+        self._reset_sensor_records()
+        self._record_due_sensor_measurements(state, 0.0)
 
         if show_progress:
             self._print_progress("Simulation", 0, num_steps, "steps")
@@ -455,6 +677,7 @@ class Simulator:
             t += self.dt
             times[k] = t
             history[k] = state
+            self._record_due_sensor_measurements(state, t)
 
             if show_progress:
                 self._print_progress("Simulation", k, num_steps, "steps")
@@ -485,6 +708,8 @@ class Simulator:
             time_s=t,
         )
         self.logger.info("Log file saved: %s", self.log_file)
+        sensor_history = self._sensor_history_arrays()
+        sensor_history_file = self._save_sensor_history(sensor_history)
 
         return {
             "times_s": times,
@@ -494,6 +719,10 @@ class Simulator:
             "num_steps": num_steps,
             "log_file": str(self.log_file),
             "dynamic_balance_rho": rho,
+            "sensor_measurements": sensor_history,
+            "sensor_history_file": (
+                None if sensor_history_file is None else str(sensor_history_file)
+            ),
         }
 
     def run_monte_carlo(

@@ -33,7 +33,45 @@ class Spacecraft:
     def __init__(
         self, config_path: str | Path = Path(__file__).with_name("config.yaml")
     ) -> None:
-        """Initialize the spacecraft object from a YAML config file."""
+        """Initialize the spacecraft object from a YAML config file
+
+        Parameters:
+        - config_path: YAML file used to load spacecraft, inertia, initial state, and safe mode settings
+
+        Attributes:
+        - names: component names from the physical model
+        - debug: extra diagnostic output flag
+        - augment_inertia: inertia perturbation flag
+        - inertia_seed: random seed for inertia perturbations and random attitude initialization
+        - mass_vector: component masses
+        - mass_deviation_fraction: fractional perturbation applied to principal moments
+        - rotation_deviation_rad: principal-axis rotation perturbation standard deviation
+        - safe_mode_enabled: safe-mode attitude initialization and gyrostat flag
+        - sun_direction_eci: Sun unit vector in ECI
+        - desired_spin_axis: desired spin axis in body coordinates
+        - desired_spin_rate: desired safe-mode spin rate
+        - J_33_multiplier: effective spin inertia multiplier
+        - last_inertia_fractional_perturbation: last sampled principal-moment perturbation
+        - last_inertia_rotation_vector: last sampled principal-axis rotation vector
+        - inertia_tensor: spacecraft inertia tensor in body coordinates
+        - rho: gyrostat momentum vector
+        - position_vectors: component centers in body coordinates
+        - dimension_vectors: component dimensions
+        - face_dimensions: surface dimensions by component
+        - face_normals: surface normals by component
+        - state_size: number of state entries
+        - Idx: state vector slice map
+        - state: full state vector
+        - position_eci: position in ECI
+        - velocity_eci: velocity in ECI
+        - attitude: attitude quaternion
+        - attitude_rate: angular velocity in body coordinates
+
+        State order:
+        - [q, omega, position_eci, velocity_eci, rho]
+
+        load_config replaces these defaults with values from the YAML file
+        """
         self.config_path = Path(config_path)
 
         self.names: list[str] = []
@@ -43,6 +81,7 @@ class Spacecraft:
         self.mass_vector: np.ndarray = np.empty((0,), dtype=float)
         self.mass_deviation_fraction: np.ndarray = np.zeros(3, dtype=float)
         self.rotation_deviation_rad: np.ndarray = np.zeros(3, dtype=float)
+        self.safe_mode_enabled: bool = True
         self.sun_direction_eci: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=float)
         self.desired_spin_axis: np.ndarray = np.array([0.0, 0.0, 1.0], dtype=float)
         self.desired_spin_rate: float = 0.0
@@ -56,7 +95,6 @@ class Spacecraft:
         self.face_dimensions: list[Dict[str, np.ndarray]] = []
         self.face_normals: list[Dict[str, np.ndarray]] = []
 
-        # Configurable state, likely to be expanded later in HWs
         self.state_size: int = self.BASE_STATE_SIZE
         self.Idx: dict[str, dict[str, slice]] = {
             "X": {
@@ -68,8 +106,6 @@ class Spacecraft:
             }
         }
         self.state: np.ndarray = np.zeros(self.state_size, dtype=float)
-
-        # Placeholder defaults; load_config sets these from YAML initial_conditions.
         self.position_eci: np.ndarray = np.zeros(3, dtype=float)
         self.velocity_eci: np.ndarray = np.zeros(3, dtype=float)
         self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
@@ -199,6 +235,11 @@ class Spacecraft:
             [0.0, 0.0, 0.0],
         )
         safe_mode_properties: Iterable[Dict] = cfg.get("safe_mode_properties", [])
+        self.safe_mode_enabled = self._property_bool(
+            safe_mode_properties,
+            "enabled",
+            default=True,
+        )
         self.sun_direction_eci = self._property_array(
             safe_mode_properties,
             "sun_direction_eci",
@@ -265,13 +306,24 @@ class Spacecraft:
         attitude_config = self._property_value(
             initial_conditions, "attitude", [1.0, 0.0, 0.0, 0.0]
         )
-        if (
-            isinstance(attitude_config, str)
-            and attitude_config.strip().lower() == "safe_mode"
-        ):
-            attitude_init = quaternion_from_two_vectors(
-                self.desired_spin_axis, self.sun_direction_eci
-            )
+        if isinstance(attitude_config, str):
+            attitude_mode = attitude_config.strip().lower()
+            if attitude_mode == "safe_mode":
+                attitude_init = (
+                    quaternion_from_two_vectors(
+                        self.desired_spin_axis, self.sun_direction_eci
+                    )
+                    if self.safe_mode_enabled
+                    else np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+                )
+            elif attitude_mode == "random":
+                rng = np.random.default_rng(self.inertia_seed)
+                attitude_init = rng.standard_normal(4)
+                attitude_init = attitude_init / np.linalg.norm(attitude_init)
+            else:
+                raise ValueError(
+                    "initial_conditions.attitude must be a quaternion, safe_mode, or random"
+                )
         else:
             attitude_init = np.asarray(attitude_config, dtype=float)
         attitude_rate_init = np.asarray(
@@ -333,7 +385,11 @@ class Spacecraft:
             else np.random.default_rng(self.inertia_seed)
         )
         self.compute_inertia_tensor(augment=self.augment_inertia, rng=rng)
-        self.rho = self.compute_dynamic_balance()
+        self.rho = (
+            self.compute_dynamic_balance()
+            if self.safe_mode_enabled
+            else np.zeros(3, dtype=float)
+        )
         self.state[self.Idx["X"]["RHO"]] = self.rho
 
     @staticmethod
@@ -577,6 +633,8 @@ class Spacecraft:
         omega = self.desired_spin_rate * self.desired_spin_axis
 
         omega_s = np.linalg.norm(omega)
+        if omega_s == 0.0:
+            return np.zeros(3, dtype=float)
         s = omega / omega_s
         J_s = s @ J @ s
         J_principal, _ = self.compute_principal_inertia_components()

@@ -25,6 +25,7 @@ class SimulationPlotContext(Protocol):
     idx: Mapping[str, Any]
     plot_layout: str
     attitude_plot_layout: str
+    sensor_plot_layout: str
     attitude_plot_mode: str
     show_simulation_overview: bool
     show_trajectory_plot: bool
@@ -33,10 +34,41 @@ class SimulationPlotContext(Protocol):
     show_angular_velocity_plot: bool
     show_gyrostat_components: bool
     show_sun_safe_mode_axis_plot: bool
+    show_sensor_plot: bool
     spacecraft: Any
     output_dir: Path | None
     config_path: Path
     logger: logging.Logger
+
+
+SENSOR_PLOT_SPEC = {
+    "magnetometer": (
+        "Magnetometer Measurements",
+        "magnetic field [uT]",
+        ["Bx [uT]", "By [uT]", "Bz [uT]"],
+    ),
+    "gyroscope": (
+        "Gyroscope Measurements",
+        "angular velocity [rad/s]",
+        ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"],
+    ),
+    "accelerometer": (
+        "Accelerometer Measurements",
+        "specific force [m/s^2]",
+        ["ax [m/s^2]", "ay [m/s^2]", "az [m/s^2]"],
+    ),
+    "sun_sensor": (
+        "Sun Sensor Measurements",
+        "unit vector [-]",
+        ["sx [-]", "sy [-]", "sz [-]"],
+    ),
+    "visual_camera": (
+        "Visual Camera Bearing Measurements",
+        "bearing [-]",
+        ["bx [-]", "by [-]", "bz [-]"],
+    ),
+}
+SENSOR_COLORS = ["#2563eb", "#f97316", "#059669", "#7c3aed"]
 
 
 def attitude_plot_values(
@@ -90,6 +122,7 @@ def simulation_plot_paths(
             "angular_velocity": root_dir / "simulation_angular_velocity.png",
             "rho": root_dir / "simulation_rho.png",
             "sun_safe_mode_axis": root_dir / "simulation_sun_safe_mode_axis.png",
+            "sensors": root_dir / "simulation_sensors.png",
         }
 
     base_path = Path(save_path)
@@ -100,10 +133,14 @@ def simulation_plot_paths(
                 "sun_safe_mode_axis": base_path.with_name(
                     f"{base_path.stem}_sun_safe_mode_axis{base_path.suffix}"
                 ),
+                "sensors": base_path.with_name(
+                    f"{base_path.stem}_sensors{base_path.suffix}"
+                ),
             }
         return {
             "overview": base_path,
             "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
+            "sensors": base_path / "simulation_sensors.png",
         }
 
     if base_path.suffix:
@@ -117,6 +154,7 @@ def simulation_plot_paths(
             "angular_velocity": root_dir / f"{prefix}_angular_velocity.png",
             "rho": root_dir / f"{prefix}_rho.png",
             "sun_safe_mode_axis": root_dir / f"{prefix}_sun_safe_mode_axis.png",
+            "sensors": root_dir / f"{prefix}_sensors.png",
         }
 
     return {
@@ -126,6 +164,7 @@ def simulation_plot_paths(
         "angular_velocity": base_path / "simulation_angular_velocity.png",
         "rho": base_path / "simulation_rho.png",
         "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
+        "sensors": base_path / "simulation_sensors.png",
     }
 
 
@@ -358,6 +397,115 @@ def plot_component_overlay(
     return fig
 
 
+def sensor_plot_items(
+    sensor_history: Mapping[str, Mapping[str, object]],
+) -> list[dict[str, object]]:
+    items = []
+    for sensor_name, sensor_data in sensor_history.items():
+        times = np.asarray(sensor_data["times_s"], dtype=float)
+        measurements = np.asarray(sensor_data["measurements"], dtype=float)
+        if times.size == 0 or measurements.size == 0:
+            continue
+        if measurements.ndim == 1:
+            measurements = measurements[:, np.newaxis]
+
+        title, ylabel, labels = SENSOR_PLOT_SPEC.get(
+            sensor_name,
+            (
+                sensor_name.replace("_", " ").title(),
+                "measurement [-]",
+                [f"component {i + 1}" for i in range(measurements.shape[1])],
+            ),
+        )
+        component_labels = list(labels[: measurements.shape[1]])
+        component_labels.extend(
+            f"component {i + 1}"
+            for i in range(len(component_labels), measurements.shape[1])
+        )
+        items.append(
+            {
+                "times": times,
+                "measurements": measurements,
+                "labels": component_labels,
+                "title": title,
+                "ylabel": ylabel,
+            }
+        )
+    return items
+
+
+def plot_sensor_measurements(
+    sensor_history: Mapping[str, Mapping[str, object]],
+    layout: str,
+) -> plt.Figure | None:
+    items = sensor_plot_items(sensor_history)
+    if not items:
+        return None
+
+    if layout == "overlay":
+        fig, axes = plt.subplots(
+            len(items),
+            1,
+            figsize=(12, max(4.5, 2.8 * len(items))),
+            facecolor=FIGURE_FACE_COLOR,
+            sharex=False,
+        )
+        axes_array = np.atleast_1d(axes)
+        fig.suptitle("Sensor Measurements", fontsize=15, fontweight="bold", y=0.99)
+        for ax, item in zip(axes_array, items):
+            times = np.asarray(item["times"], dtype=float)
+            measurements = np.asarray(item["measurements"], dtype=float)
+            labels = list(item["labels"])
+            style_time_axis(ax)
+            for i in range(measurements.shape[1]):
+                ax.plot(
+                    times,
+                    measurements[:, i],
+                    linewidth=1.5,
+                    color=SENSOR_COLORS[i % len(SENSOR_COLORS)],
+                    label=labels[i],
+                )
+            ax.set_title(str(item["title"]))
+            ax.set_ylabel(str(item["ylabel"]))
+            ax.legend(loc="best")
+        axes_array[-1].set_xlabel("time [s]")
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+        return fig
+
+    total_rows = sum(np.asarray(item["measurements"]).shape[1] for item in items)
+    fig, axes = plt.subplots(
+        total_rows,
+        1,
+        figsize=(12, max(4.5, 2.0 * total_rows)),
+        facecolor=FIGURE_FACE_COLOR,
+        sharex=False,
+    )
+    axes_array = np.atleast_1d(axes)
+    fig.suptitle("Sensor Measurements", fontsize=15, fontweight="bold", y=0.99)
+
+    row = 0
+    for item in items:
+        times = np.asarray(item["times"], dtype=float)
+        measurements = np.asarray(item["measurements"], dtype=float)
+        labels = list(item["labels"])
+        for i in range(measurements.shape[1]):
+            ax = axes_array[row]
+            style_time_axis(ax)
+            ax.plot(
+                times,
+                measurements[:, i],
+                linewidth=1.4,
+                color=SENSOR_COLORS[i % len(SENSOR_COLORS)],
+            )
+            ax.set_ylabel(labels[i])
+            if i == 0:
+                ax.set_title(str(item["title"]))
+            row += 1
+    axes_array[-1].set_xlabel("time [s]")
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    return fig
+
+
 def plot_simulation_overview(
     ctx: SimulationPlotContext,
     times: np.ndarray,
@@ -557,7 +705,7 @@ def plot_simulation_overview(
 
 def plot_simulation(
     ctx: SimulationPlotContext,
-    result: dict[str, np.ndarray | float | int],
+    result: dict[str, object],
     show: bool = True,
     save_path: str | Path | None = None,
 ) -> plt.Figure | dict[str, plt.Figure]:
@@ -587,6 +735,11 @@ def plot_simulation(
             alignment_angle_deg,
         )
 
+    sensor_fig = None
+    sensor_history = result.get("sensor_measurements", {})
+    if ctx.show_sensor_plot and isinstance(sensor_history, Mapping):
+        sensor_fig = plot_sensor_measurements(sensor_history, ctx.sensor_plot_layout)
+
     if ctx.plot_layout == "together":
         fig = None
         if ctx.show_simulation_overview:
@@ -603,11 +756,18 @@ def plot_simulation(
                 plot_paths["sun_safe_mode_axis"],
                 "Sun safe-mode axis plot saved",
             )
+        if sensor_fig is not None:
+            save_figure(
+                ctx.logger,
+                sensor_fig,
+                plot_paths["sensors"],
+                "Sensor plot saved",
+            )
 
         if show:
             plt.show()
 
-        return fig if fig is not None else (sun_safe_mode_axis_fig or {})
+        return fig if fig is not None else (sun_safe_mode_axis_fig or sensor_fig or {})
 
     figures = {}
     if ctx.show_trajectory_plot:
@@ -656,6 +816,8 @@ def plot_simulation(
         )
     if sun_safe_mode_axis_fig is not None:
         figures["sun_safe_mode_axis"] = sun_safe_mode_axis_fig
+    if sensor_fig is not None:
+        figures["sensors"] = sensor_fig
     if ctx.show_gyrostat_components:
         figures["rho"] = (
             plot_component_overlay(
@@ -716,6 +878,13 @@ def plot_simulation(
             figures["rho"],
             plot_paths["rho"],
             "Gyrostat momentum plot saved",
+        )
+    if "sensors" in figures:
+        save_figure(
+            ctx.logger,
+            figures["sensors"],
+            plot_paths["sensors"],
+            "Sensor plot saved",
         )
 
     if show:
