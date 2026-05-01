@@ -1,5 +1,5 @@
 __pycache__
 .venv
-
+.ruff_cache
 Class_Material/
 *.png

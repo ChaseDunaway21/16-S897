@@ -60,17 +60,22 @@ def _run_single_monte_carlo_trial(
         "final_rho_kgm2s": final_state[idx["RHO"]].tolist(),
     }
 
+
 class Simulator:
     """Run Simulation of Satellite"""
 
-    def __init__(self, config_path: str | Path, output_dir: str | Path | None = None) -> None:
+    def __init__(
+        self, config_path: str | Path, output_dir: str | Path | None = None
+    ) -> None:
         self.config_path = Path(config_path)
         self._output_dir_explicit = output_dir is not None
         self.single_run_seed: int | None = None
 
         if output_dir is None:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.output_dir = self.config_path.parent / "results" / f"simulation_{stamp}"
+            self.output_dir = (
+                self.config_path.parent / "results" / f"simulation_{stamp}"
+            )
         else:
             self.output_dir = Path(output_dir)
 
@@ -100,12 +105,20 @@ class Simulator:
             self.cfg = trial_cfg
 
         self.spacecraft = Spacecraft(effective_config_path)
-        self.dt = float(self._property_value(self.cfg.get("simulation_properties", []), "time_step", 1.0))
+        self.dt = float(
+            self._property_value(
+                self.cfg.get("simulation_properties", []), "time_step", 1.0
+            )
+        )
         self.max_simulation_time = float(
-            self._property_value(self.cfg.get("simulation_properties", []), "max_simulation_time", 7200.0)
+            self._property_value(
+                self.cfg.get("simulation_properties", []), "max_simulation_time", 7200.0
+            )
         )
         self.integration_method = str(
-            self._property_value(self.cfg.get("integration_properties", []), "integration_method", "rk4")
+            self._property_value(
+                self.cfg.get("integration_properties", []), "integration_method", "rk4"
+            )
         ).lower()
         plotting_properties = self.cfg.get("plotting_properties", [])
         self.plot_layout = self._validated_option(
@@ -136,9 +149,15 @@ class Simulator:
             "show_simulation_overview",
             True,
         )
-        self.show_trajectory_plot = self._property_bool(plotting_properties, "show_trajectory_plot", True)
-        self.show_velocity_plot = self._property_bool(plotting_properties, "show_velocity_plot", True)
-        self.show_attitude_plot = self._property_bool(plotting_properties, "show_attitude_plot", True)
+        self.show_trajectory_plot = self._property_bool(
+            plotting_properties, "show_trajectory_plot", True
+        )
+        self.show_velocity_plot = self._property_bool(
+            plotting_properties, "show_velocity_plot", True
+        )
+        self.show_attitude_plot = self._property_bool(
+            plotting_properties, "show_attitude_plot", True
+        )
         self.show_angular_velocity_plot = self._property_bool(
             plotting_properties,
             "show_angular_velocity_plot",
@@ -165,7 +184,9 @@ class Simulator:
 
         self.idx = self.spacecraft.Idx["X"]
         self.log_interval_steps = int(
-            self._property_value(self.cfg.get("simulation_properties", []), "log_interval_steps", 1000)
+            self._property_value(
+                self.cfg.get("simulation_properties", []), "log_interval_steps", 1000
+            )
         )
         self.log_file = self._setup_logger()
         if self.single_run_seed is not None:
@@ -175,7 +196,9 @@ class Simulator:
             )
 
     @staticmethod
-    def _property_value(items: Iterable[Dict], target_name: str, default: float | int | str) -> float | int | str:
+    def _property_value(
+        items: Iterable[Dict], target_name: str, default: float | int | str
+    ) -> float | int | str:
         for item in items:
             if str(item.get("name", "")).strip() == target_name:
                 return item.get("value", default)
@@ -189,14 +212,18 @@ class Simulator:
         return None
 
     @classmethod
-    def _property_bool(cls, items: Iterable[Dict], target_name: str, default: bool = True) -> bool:
+    def _property_bool(
+        cls, items: Iterable[Dict], target_name: str, default: bool = True
+    ) -> bool:
         value = cls._property_value(items, target_name, default)
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
     @staticmethod
-    def _validated_option(value: object, valid_options: set[str], field_name: str) -> str:
+    def _validated_option(
+        value: object, valid_options: set[str], field_name: str
+    ) -> str:
         option = str(value).strip().lower()
         if option not in valid_options:
             valid_list = ", ".join(sorted(valid_options))
@@ -245,10 +272,16 @@ class Simulator:
             deviation = item.get("deviation")
             perturbation = item.get("perturbation")
 
-            if deviation is None and perturbation is None and "nominal_value" not in item:
+            if (
+                deviation is None
+                and perturbation is None
+                and "nominal_value" not in item
+            ):
                 continue
 
-            sampled_value = self._sample_with_uncertainty(rng, base, deviation, perturbation)
+            sampled_value = self._sample_with_uncertainty(
+                rng, base, deviation, perturbation
+            )
 
             if item_name == "attitude":
                 q = np.asarray(sampled_value, dtype=float)
@@ -262,7 +295,9 @@ class Simulator:
         inertia_properties = trial_cfg.get("inertia_properties", []) or []
         inertia_seed = self._property_item(inertia_properties, "inertia_seed")
         if inertia_seed is None:
-            inertia_properties.append({"name": "inertia_seed", "value": seed + trial_index})
+            inertia_properties.append(
+                {"name": "inertia_seed", "value": seed + trial_index}
+            )
             trial_cfg["inertia_properties"] = inertia_properties
         else:
             inertia_seed["value"] = seed + trial_index
@@ -272,7 +307,9 @@ class Simulator:
     @staticmethod
     def _orbit_period_seconds(position_m: np.ndarray) -> float:
         r = np.linalg.norm(position_m)
-        return 2.0 * np.pi * np.sqrt(r**3 / MU_EARTH) # TODO Change for non-circular orbits later
+        return (
+            2.0 * np.pi * np.sqrt(r**3 / MU_EARTH)
+        )  # TODO Change for non-circular orbits later
 
     def _setup_logger(self) -> Path:
         """Create a file logger under Project/results for simulation run diagnostics."""
@@ -286,7 +323,9 @@ class Simulator:
 
         self.logger.handlers.clear()
         handler = logging.FileHandler(log_file, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+        )
         self.logger.addHandler(handler)
 
         self.logger.info("Logger initialized")
@@ -296,7 +335,9 @@ class Simulator:
     @staticmethod
     def _vector_to_string(vec: np.ndarray, precision: int = 6) -> str:
         """Format a vector for readable component logging."""
-        return np.array2string(np.asarray(vec, dtype=float), precision=precision, separator=", ")
+        return np.array2string(
+            np.asarray(vec, dtype=float), precision=precision, separator=", "
+        )
 
     def _log_state_components(
         self,
@@ -314,11 +355,22 @@ class Simulator:
             message += f" | t={time_s:.2f} s"
 
         self.logger.info(message)
-        self.logger.info("  position [m]: %s", self._vector_to_string(state[self.idx["POS_ECI"]]))
-        self.logger.info("  velocity [m/s]: %s", self._vector_to_string(state[self.idx["VEL_ECI"]]))
-        self.logger.info("  attitude [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE"]]))
-        self.logger.info("  omega [rad/s]: %s", self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]))
-        self.logger.info("  rho [kg m^2/s]: %s", self._vector_to_string(state[self.idx["RHO"]]))
+        self.logger.info(
+            "  position [m]: %s", self._vector_to_string(state[self.idx["POS_ECI"]])
+        )
+        self.logger.info(
+            "  velocity [m/s]: %s", self._vector_to_string(state[self.idx["VEL_ECI"]])
+        )
+        self.logger.info(
+            "  attitude [-]: %s", self._vector_to_string(state[self.idx["ATTITUDE"]])
+        )
+        self.logger.info(
+            "  omega [rad/s]: %s",
+            self._vector_to_string(state[self.idx["ATTITUDE_RATE"]]),
+        )
+        self.logger.info(
+            "  rho [kg m^2/s]: %s", self._vector_to_string(state[self.idx["RHO"]])
+        )
 
     @staticmethod
     def _progress_fraction(current: int, total: int) -> float:
@@ -327,11 +379,15 @@ class Simulator:
         return min(max(current / total, 0.0), 1.0)
 
     @classmethod
-    def _progress_line(cls, label: str, current: int, total: int, unit: str, width: int = 28) -> str:
+    def _progress_line(
+        cls, label: str, current: int, total: int, unit: str, width: int = 28
+    ) -> str:
         fraction = cls._progress_fraction(current, total)
         filled = int(width * fraction)
         bar = "#" * filled + "-" * (width - filled)
-        return f"{label:<11} [{bar}] {current}/{total} {unit} ({100.0 * fraction:5.1f}%)"
+        return (
+            f"{label:<11} [{bar}] {current}/{total} {unit} ({100.0 * fraction:5.1f}%)"
+        )
 
     @classmethod
     def _print_progress(cls, label: str, current: int, total: int, unit: str) -> None:
@@ -356,16 +412,17 @@ class Simulator:
         )
         rho = state[self.idx["RHO"]]
         J_principal, _ = self.spacecraft.compute_principal_inertia_components()
-        J_eff = self.spacecraft.J_eff * J_principal[2]
         rho_message = (
-            f"Dynamic balance rho (Jeff = J_33 * {self.spacecraft.J_eff:.6g}): "
+            f"Dynamic balance rho (Jeff = J_33 * {self.spacecraft.J_33_multiplier:.6g}): "
             f"{self._vector_to_string(rho)} [kg m^2/s] "
             f" | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
         )
         self.logger.info(rho_message)
         if show_progress or self.spacecraft.debug:
             print(rho_message)
-        desired_omega = self.spacecraft.desired_spin_rate * self.spacecraft.desired_spin_axis
+        desired_omega = (
+            self.spacecraft.desired_spin_rate * self.spacecraft.desired_spin_axis
+        )
         initial_omega = state[self.idx["ATTITUDE_RATE"]]
         omega_error = initial_omega - desired_omega
         if np.linalg.norm(omega_error) > 1e-9:
@@ -376,7 +433,9 @@ class Simulator:
                 self._vector_to_string(desired_omega),
                 self._vector_to_string(initial_omega),
             )
-        self._log_state_components("Initial state", state, step=0, total_steps=num_steps, time_s=0.0)
+        self._log_state_components(
+            "Initial state", state, step=0, total_steps=num_steps, time_s=0.0
+        )
 
         times = np.zeros(num_steps + 1, dtype=float)
         history = np.zeros((num_steps + 1, state.size), dtype=float)
@@ -400,8 +459,12 @@ class Simulator:
             if show_progress:
                 self._print_progress("Simulation", k, num_steps, "steps")
 
-            if self.log_interval_steps > 0 and (k % self.log_interval_steps == 0 or k == num_steps):
-                self._log_state_components("Progress", state, step=k, total_steps=num_steps, time_s=t)
+            if self.log_interval_steps > 0 and (
+                k % self.log_interval_steps == 0 or k == num_steps
+            ):
+                self._log_state_components(
+                    "Progress", state, step=k, total_steps=num_steps, time_s=t
+                )
 
         final_state = history[-1]
 
@@ -414,7 +477,13 @@ class Simulator:
         self.spacecraft.set_state(updated_state)
 
         self.logger.info("Simulation complete")
-        self._log_state_components("Final state", updated_state, step=num_steps, total_steps=num_steps, time_s=t)
+        self._log_state_components(
+            "Final state",
+            updated_state,
+            step=num_steps,
+            total_steps=num_steps,
+            time_s=t,
+        )
         self.logger.info("Log file saved: %s", self.log_file)
 
         return {
@@ -448,9 +517,13 @@ class Simulator:
             raise ValueError("Monte Carlo trials must be positive")
 
         base_seed = int(seed if seed is not None else mc_item.get("seed", 42))
-        default_root = self.output_dir if self._output_dir_explicit else (self.config_path.parent / "results")
+        default_root = (
+            self.output_dir
+            if self._output_dir_explicit
+            else (self.config_path.parent / "results")
+        )
         mc_root = default_root / "monte_carlo"
-        root_dir = mc_root / datetime.now().strftime('%Y%m%d_%H%M%S')
+        root_dir = mc_root / datetime.now().strftime("%Y%m%d_%H%M%S")
         root_dir.mkdir(parents=True, exist_ok=True)
 
         trial_jobs: list[tuple[str, str, bool]] = []
@@ -471,22 +544,31 @@ class Simulator:
         summaries: list[dict[str, object]] = []
         completed_trials = 0
         if show_progress:
-            self._print_progress("Monte Carlo", completed_trials, total_trials, "trials")
+            self._print_progress(
+                "Monte Carlo", completed_trials, total_trials, "trials"
+            )
 
         if max_workers == 1:
             for job in trial_jobs:
                 summaries.append(_run_single_monte_carlo_trial(*job))
                 completed_trials += 1
                 if show_progress:
-                    self._print_progress("Monte Carlo", completed_trials, total_trials, "trials")
+                    self._print_progress(
+                        "Monte Carlo", completed_trials, total_trials, "trials"
+                    )
         else:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(_run_single_monte_carlo_trial, *job) for job in trial_jobs]
+                futures = [
+                    executor.submit(_run_single_monte_carlo_trial, *job)
+                    for job in trial_jobs
+                ]
                 for future in as_completed(futures):
                     summaries.append(future.result())
                     completed_trials += 1
                     if show_progress:
-                        self._print_progress("Monte Carlo", completed_trials, total_trials, "trials")
+                        self._print_progress(
+                            "Monte Carlo", completed_trials, total_trials, "trials"
+                        )
 
         summaries.sort(key=lambda item: str(item.get("output_dir", "")))
 

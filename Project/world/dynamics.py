@@ -1,6 +1,4 @@
 """
-Author: Chase Dunaway
-
 Integrates the orbital dynamics of the ARGUS Satellite using RK4 and spherical acceleration.
 
 OUTPUT:
@@ -12,8 +10,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math import attitude_jacobian, skew_symmetric
+from world.math import skew_symmetric
+from world.rotations_and_transformations import attitude_jacobian
 import world.models.gravity as gravity
+
 
 def f(
     state: np.ndarray,
@@ -32,7 +32,8 @@ def f(
     attitude_dynamics(state, state_dot, state_index, inertia_tensor)
 
     return state_dot
-    
+
+
 def attitude_dynamics(
     state: np.ndarray,
     state_dot: np.ndarray,
@@ -48,7 +49,7 @@ def attitude_dynamics(
     w = state[attitude_rate_slice]
     rho = state[state_index["RHO"]]
 
-    qdot = 0.5 * attitude_jacobian(q) @ w # Attitude Jacobian from Notes
+    qdot = 0.5 * attitude_jacobian(q) @ w  # Attitude Jacobian from Notes
 
     # Using the numpy solver to speed up the simulation, but this is the same as the notes (no gyrostats, tau = 0):
     # First, convert J into the principal components frame
@@ -58,13 +59,18 @@ def attitude_dynamics(
     # wdot_3 = -(J22 - J11)* w1 * w2 / J33
 
     # This time add the gyrostat momentum (rhodot = 0)
-    wdot = np.linalg.solve(inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w + rho)) # J wdot + w x (Jw + rho) = 0
+    wdot = np.linalg.solve(
+        inertia_tensor, -skew_symmetric(w) @ (inertia_tensor @ w + rho)
+    )  # J wdot + w x (Jw + rho) = 0
 
     state_dot[attitude_slice] = qdot
     state_dot[attitude_rate_slice] = wdot
     return state_dot
 
-def orbital_dynamics(state: np.ndarray, state_dot: np.ndarray, state_index: dict) -> np.ndarray:
+
+def orbital_dynamics(
+    state: np.ndarray, state_dot: np.ndarray, state_index: dict
+) -> np.ndarray:
     """Compute translational orbital dynamics in the full state vector."""
 
     pos_slice = state_index["POS_ECI"]
@@ -75,14 +81,41 @@ def orbital_dynamics(state: np.ndarray, state_dot: np.ndarray, state_index: dict
 
     return state_dot
 
-def rk4_step(state: np.ndarray, current_time: float, dt: float, derivative_fn) -> np.ndarray:
+
+def rk4_step(
+    state: np.ndarray,
+    current_time: float,
+    dt: float,
+    derivative_fn,
+    state_index: dict,
+    inertia_tensor: np.ndarray,
+) -> np.ndarray:
     """Generic RK4 step for any state dimension and derivative function."""
-    k1 = derivative_fn(state, current_time, dt)
-    k2 = derivative_fn(state + 0.5 * dt * k1, current_time + 0.5 * dt, dt)
-    k3 = derivative_fn(state + 0.5 * dt * k2, current_time + 0.5 * dt, dt)
-    k4 = derivative_fn(state + dt * k3, current_time + dt, dt)
+    k1 = derivative_fn(state, state_index, current_time, dt, inertia_tensor)
+    k2 = derivative_fn(
+        state + 0.5 * dt * k1,
+        state_index,
+        current_time + 0.5 * dt,
+        dt,
+        inertia_tensor,
+    )
+    k3 = derivative_fn(
+        state + 0.5 * dt * k2,
+        state_index,
+        current_time + 0.5 * dt,
+        dt,
+        inertia_tensor,
+    )
+    k4 = derivative_fn(
+        state + dt * k3,
+        state_index,
+        current_time + dt,
+        dt,
+        inertia_tensor,
+    )
 
     return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
 
 def integrate_dynamics(
     spacecraft,
@@ -98,12 +131,19 @@ def integrate_dynamics(
     inertia_tensor = spacecraft.inertia_tensor
 
     if derivative_fn is None:
-        derivative_fn = lambda x, t, h: f(x, state_index, t, h, inertia_tensor)
+        derivative_fn = f
 
     if method == "rk4":
         attitude_slice = state_index["ATTITUDE"]
 
-        x_new = rk4_step(state, current_time, dt, derivative_fn)
+        x_new = rk4_step(
+            state,
+            current_time,
+            dt,
+            derivative_fn,
+            state_index,
+            inertia_tensor,
+        )
         quat_norm = np.linalg.norm(x_new[attitude_slice])
         if quat_norm > 0.0:
             x_new[attitude_slice] /= quat_norm
@@ -111,6 +151,6 @@ def integrate_dynamics(
         spacecraft.set_state(x_new)
 
     else:
-        raise ValueError(f"only RK4")
-    
+        raise ValueError("only RK4")
+
     return x_new

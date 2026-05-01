@@ -1,6 +1,4 @@
 """
-Author: Chase Dunaway
-
 Spacecraft Object for the ARGUS Satellite
 
 The config.yaml file contains the physical properties of the satellite
@@ -10,7 +8,6 @@ References:
     York, NY: Springer, 2014, vol. 33.
 """
 
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,20 +16,23 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 
-from world.math import (
+from world.math import skew_symmetric
+from world.rotations_and_transformations import (
     R_body_to_inertial,
     quaternion_from_two_vectors,
     rotation_vector_exponential,
-    skew_symmetric,
 )
 from world.models.constants import MU_EARTH
+
 
 class Spacecraft:
     """Spacecraft object for the ARGUS Satellite"""
 
-    BASE_STATE_SIZE = 16 # [quaternion(4), omega(3), position(3), velocity(3), rho(3)]
+    BASE_STATE_SIZE = 16  # [quaternion(4), omega(3), position(3), velocity(3), rho(3)]
 
-    def __init__(self, config_path: str | Path = Path(__file__).with_name("config.yaml")) -> None:
+    def __init__(
+        self, config_path: str | Path = Path(__file__).with_name("config.yaml")
+    ) -> None:
         """Initialize the spacecraft object from a YAML config file."""
         self.config_path = Path(config_path)
 
@@ -46,7 +46,7 @@ class Spacecraft:
         self.sun_direction_eci: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=float)
         self.desired_spin_axis: np.ndarray = np.array([0.0, 0.0, 1.0], dtype=float)
         self.desired_spin_rate: float = 0.0
-        self.J_eff: float = 0.0
+        self.J_33_multiplier: float = 0.0
         self.last_inertia_fractional_perturbation: np.ndarray = np.zeros(3, dtype=float)
         self.last_inertia_rotation_vector: np.ndarray = np.zeros(3, dtype=float)
         self.inertia_tensor: np.ndarray = np.zeros((3, 3), dtype=float)
@@ -82,7 +82,9 @@ class Spacecraft:
     #################################################################################################
 
     @staticmethod
-    def _property_value(items: Iterable[Dict], target_name: str, default: object) -> object:
+    def _property_value(
+        items: Iterable[Dict], target_name: str, default: object
+    ) -> object:
         """Extract a named scalar value from a list of {name, value} property dictionaries."""
         for item in items:
             if str(item.get("name", "")).strip() == target_name:
@@ -108,15 +110,18 @@ class Spacecraft:
         return default
 
     @classmethod
-    def _property_bool(cls, items: Iterable[Dict], target_name: str, default: bool = False) -> bool:
+    def _property_bool(
+        cls, items: Iterable[Dict], target_name: str, default: bool = False
+    ) -> bool:
         """Extract and normalize a named boolean property."""
         return cls._as_bool(cls._property_value(items, target_name, default), default)
 
     @classmethod
-    def _property_array(cls, items: Iterable[Dict], target_name: str, default: object) -> np.ndarray:
+    def _property_array(
+        cls, items: Iterable[Dict], target_name: str, default: object
+    ) -> np.ndarray:
         """Extract a named vector property."""
         return np.asarray(cls._property_value(items, target_name, default), dtype=float)
-
 
     # Bunch of YAML parsing helpers
     @staticmethod
@@ -199,7 +204,9 @@ class Spacecraft:
             "sun_direction_eci",
             [1.0, 0.0, 0.0],
         )
-        self.sun_direction_eci = self.sun_direction_eci / np.linalg.norm(self.sun_direction_eci)
+        self.sun_direction_eci = self.sun_direction_eci / np.linalg.norm(
+            self.sun_direction_eci
+        )
         self.desired_spin_axis = self._property_array(
             safe_mode_properties,
             "desired_spin_axis",
@@ -208,13 +215,19 @@ class Spacecraft:
         self.desired_spin_rate = float(
             self._property_value(safe_mode_properties, "desired_spin_rate", 0.0)
         )
-        self.J_eff = float(self._property_value(safe_mode_properties, "J_eff", 0.0))
+        self.J_33_multiplier = float(
+            self._property_value(safe_mode_properties, "J_33_multiplier", 0.0)
+        )
 
         dynamics_properties: Iterable[Dict] = cfg.get("dynamics_properties", [])
-        raw_state_size = self._property_value(dynamics_properties, "state_size", self.BASE_STATE_SIZE)
+        raw_state_size = self._property_value(
+            dynamics_properties, "state_size", self.BASE_STATE_SIZE
+        )
         self.state_size = int(raw_state_size)
         if self.state_size < self.BASE_STATE_SIZE:
-            raise ValueError(f"state_size must be >= {self.BASE_STATE_SIZE} to hold [q, omega, r, v, rho]")
+            raise ValueError(
+                f"state_size must be >= {self.BASE_STATE_SIZE} to hold [q, omega, r, v, rho]"
+            )
 
         self.Idx = {
             "X": {
@@ -231,17 +244,34 @@ class Spacecraft:
         initial_conditions: Iterable[Dict] = cfg.get("initial_conditions", [])
 
         position_init, velocity_init = self._state_from_orbital_elements(
-            semi_major_axis_m=float(self._property_value(initial_conditions, "semi-major_axis", 6_968_000.0)),
-            eccentricity=float(self._property_value(initial_conditions, "eccentricity", 0.0)),
-            inclination_deg=float(self._property_value(initial_conditions, "inclination", 0.0)),
+            semi_major_axis_m=float(
+                self._property_value(initial_conditions, "semi-major_axis", 6_968_000.0)
+            ),
+            eccentricity=float(
+                self._property_value(initial_conditions, "eccentricity", 0.0)
+            ),
+            inclination_deg=float(
+                self._property_value(initial_conditions, "inclination", 0.0)
+            ),
             raan_deg=float(self._property_value(initial_conditions, "raan", 0.0)),
-            argument_of_perigee_deg=float(self._property_value(initial_conditions, "argument_of_perigee", 0.0)),
-            true_anomaly_deg=float(self._property_value(initial_conditions, "true_anomaly", 0.0)),
+            argument_of_perigee_deg=float(
+                self._property_value(initial_conditions, "argument_of_perigee", 0.0)
+            ),
+            true_anomaly_deg=float(
+                self._property_value(initial_conditions, "true_anomaly", 0.0)
+            ),
         )
 
-        attitude_config = self._property_value(initial_conditions, "attitude", [1.0, 0.0, 0.0, 0.0])
-        if isinstance(attitude_config, str) and attitude_config.strip().lower() == "safe_mode":
-            attitude_init = quaternion_from_two_vectors(self.desired_spin_axis, self.sun_direction_eci)
+        attitude_config = self._property_value(
+            initial_conditions, "attitude", [1.0, 0.0, 0.0, 0.0]
+        )
+        if (
+            isinstance(attitude_config, str)
+            and attitude_config.strip().lower() == "safe_mode"
+        ):
+            attitude_init = quaternion_from_two_vectors(
+                self.desired_spin_axis, self.sun_direction_eci
+            )
         else:
             attitude_init = np.asarray(attitude_config, dtype=float)
         attitude_rate_init = np.asarray(
@@ -249,7 +279,9 @@ class Spacecraft:
             dtype=float,
         )
         if attitude_rate_init.ndim != 1 or attitude_rate_init.size != 3:
-            raise ValueError("initial_conditions.attitude_rate must be a 3-element angular velocity vector [wx, wy, wz]")
+            raise ValueError(
+                "initial_conditions.attitude_rate must be a 3-element angular velocity vector [wx, wy, wz]"
+            )
 
         initial_state = np.zeros(self.state_size, dtype=float)
         initial_state[self.Idx["X"]["POS_ECI"]] = position_init
@@ -269,7 +301,9 @@ class Spacecraft:
             name = str(item.get("name", "unknown_component"))
             mass = float(item.get("mass", 0.0))
             dimensions = self._dimensions_vector(item.get("dimensions"))
-            geometric_center = self._geometric_center_vector(item.get("geometric_center"))
+            geometric_center = self._geometric_center_vector(
+                item.get("geometric_center")
+            )
             component_faces = self._face_vectors(item.get("faces"))
 
             names.append(name)
@@ -282,14 +316,22 @@ class Spacecraft:
         self.names = names
         self.mass_vector = np.asarray(masses, dtype=float)
         self.dimension_vectors = (
-            np.vstack(dimension_vectors) if dimension_vectors else np.empty((0, 3), dtype=float)
+            np.vstack(dimension_vectors)
+            if dimension_vectors
+            else np.empty((0, 3), dtype=float)
         )
         self.position_vectors = (
-            np.vstack(geometric_centers) if geometric_centers else np.empty((0, 3), dtype=float)
+            np.vstack(geometric_centers)
+            if geometric_centers
+            else np.empty((0, 3), dtype=float)
         )
         self.face_dimensions = face_dimensions
         self.face_normals = face_normals
-        rng = None if self.inertia_seed is None else np.random.default_rng(self.inertia_seed)
+        rng = (
+            None
+            if self.inertia_seed is None
+            else np.random.default_rng(self.inertia_seed)
+        )
         self.compute_inertia_tensor(augment=self.augment_inertia, rng=rng)
         self.rho = self.compute_dynamic_balance()
         self.state[self.Idx["X"]["RHO"]] = self.rho
@@ -314,13 +356,17 @@ class Spacecraft:
         if e < 0.0 or e >= 1.0:
             raise ValueError("0 <= e < 1")
 
-        p = a * (1.0 - e * e) # Eq 10.15 [1]
+        p = a * (1.0 - e * e)  # Eq 10.15 [1]
         cos_nu = np.cos(nu)
         sin_nu = np.sin(nu)
-        r_norm = p / (1.0 + e * cos_nu) # Eq 10.21 [1]
+        r_norm = p / (1.0 + e * cos_nu)  # Eq 10.21 [1]
 
-        r_pqw = np.array([r_norm * cos_nu, r_norm * sin_nu, 0.0], dtype=float)  # Eq 10.49a [1] (inclination is in R)
-        v_pqw = np.sqrt(MU_EARTH / p) * np.array([-sin_nu, e + cos_nu, 0.0], dtype=float) # Eq 10.49b [1] (inclination is in R)
+        r_pqw = np.array(
+            [r_norm * cos_nu, r_norm * sin_nu, 0.0], dtype=float
+        )  # Eq 10.49a [1] (inclination is in R)
+        v_pqw = np.sqrt(MU_EARTH / p) * np.array(
+            [-sin_nu, e + cos_nu, 0.0], dtype=float
+        )  # Eq 10.49b [1] (inclination is in R)
 
         c_raan, s_raan = np.cos(raan), np.sin(raan)
         c_inc, s_inc = np.cos(inc), np.sin(inc)
@@ -328,12 +374,20 @@ class Spacecraft:
 
         rotation = np.array(
             [
-                [c_raan * c_argp - s_raan * s_argp * c_inc, -c_raan * s_argp - s_raan * c_argp * c_inc, s_raan * s_inc],
-                [s_raan * c_argp + c_raan * s_argp * c_inc, -s_raan * s_argp + c_raan * c_argp * c_inc, -c_raan * s_inc],
+                [
+                    c_raan * c_argp - s_raan * s_argp * c_inc,
+                    -c_raan * s_argp - s_raan * c_argp * c_inc,
+                    s_raan * s_inc,
+                ],
+                [
+                    s_raan * c_argp + c_raan * s_argp * c_inc,
+                    -s_raan * s_argp + c_raan * c_argp * c_inc,
+                    -c_raan * s_inc,
+                ],
                 [s_argp * s_inc, c_argp * s_inc, c_inc],
             ],
             dtype=float,
-        ) # Eq 10.75 [1]
+        )  # Eq 10.75 [1]
 
         position = rotation @ r_pqw
         velocity = rotation @ v_pqw
@@ -342,11 +396,13 @@ class Spacecraft:
     #################################################################################################
     # SETTERS, GETTERS
     #################################################################################################
-    
+
     def set_state(self, state: np.ndarray) -> None:
         """Set the full spacecraft state vector."""
         if state.ndim != 1 or state.size != self.state_size:
-            raise ValueError(f"state must be a 1D vector with {self.state_size} elements")
+            raise ValueError(
+                f"state must be a 1D vector with {self.state_size} elements"
+            )
 
         self.state = state.astype(float)
         self.position_eci = self.state[self.Idx["X"]["POS_ECI"]]
@@ -389,7 +445,10 @@ class Spacecraft:
         if total_mass == 0.0:
             raise ValueError("Total mass is zero")
 
-        com = np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0) / total_mass
+        com = (
+            np.sum(self.mass_vector[:, np.newaxis] * self.position_vectors, axis=0)
+            / total_mass
+        )
 
         return com
 
@@ -402,7 +461,11 @@ class Spacecraft:
         inertia_tensor: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Return principal moments and principal axes for J = V D V^T."""
-        inertia = self.inertia_tensor if inertia_tensor is None else np.asarray(inertia_tensor, dtype=float)
+        inertia = (
+            self.inertia_tensor
+            if inertia_tensor is None
+            else np.asarray(inertia_tensor, dtype=float)
+        )
         principal_moments, principal_axes = np.linalg.eigh(inertia)
         return principal_moments, principal_axes
 
@@ -412,18 +475,20 @@ class Spacecraft:
         rng: np.random.Generator | None = None,
     ) -> np.ndarray:
         """Perturb nominal inertia principal using SVD method in homework 2
-        
+
         J = VDV^T
 
         D_aug = D * (1 + d)
         V_aug = V * expm(v_hat) (v_hat is skew-symmetric of v)
-        
+
         J_aug = V_aug D_aug V_aug^T
         """
         if rng is None:
             rng = np.random.default_rng()
 
-        J_principal, principal_axes = self.compute_principal_inertia_components(nominal_inertia_tensor)
+        J_principal, principal_axes = self.compute_principal_inertia_components(
+            nominal_inertia_tensor
+        )
 
         # Compute D_aug
         d = self.mass_deviation_fraction * rng.standard_normal(size=3)
@@ -434,7 +499,9 @@ class Spacecraft:
 
         augmented_axes = principal_axes @ rotation_perturbation
         augmented_moments = J_principal * (1.0 + d)
-        augmented_inertia = augmented_axes @ np.diag(augmented_moments) @ augmented_axes.T
+        augmented_inertia = (
+            augmented_axes @ np.diag(augmented_moments) @ augmented_axes.T
+        )
 
         self.last_inertia_fractional_perturbation = d
         self.last_inertia_rotation_vector = rotation_vector
@@ -459,7 +526,9 @@ class Spacecraft:
             self.dimension_vectors,
         ):
             dx, dy, dz = np.asarray(dimensions, dtype=float)
-            local_inertia = (float(mass) / 12.0) * np.diag( # Inertia for rectangular prisms
+            local_inertia = (
+                float(mass) / 12.0
+            ) * np.diag(  # Inertia for rectangular prisms
                 [
                     dy**2 + dz**2,
                     dx**2 + dz**2,
@@ -468,14 +537,16 @@ class Spacecraft:
             )
 
             r = np.asarray(position, dtype=float) - center_of_mass
-            parallel_axis = float(mass) * (np.dot(r, r) * np.eye(3) - np.outer(r, r    ))
+            parallel_axis = float(mass) * (np.dot(r, r) * np.eye(3) - np.outer(r, r))
             component_inertia = local_inertia + parallel_axis
             component_inertias.append((name, component_inertia))
             inertia_tensor += component_inertia
 
         # Homework 2 augmentation for safe mode
         if use_augmentation:
-            inertia_tensor = self.compute_augment_inertia_tensor(inertia_tensor, rng=rng)
+            inertia_tensor = self.compute_augment_inertia_tensor(
+                inertia_tensor, rng=rng
+            )
         else:
             self.last_inertia_fractional_perturbation = np.zeros(3, dtype=float)
             self.last_inertia_rotation_vector = np.zeros(3, dtype=float)
@@ -495,12 +566,12 @@ class Spacecraft:
             print("Principal-to-body rotation matrix R_B_P [-]:")
             print(np.array2string(principal_axes, precision=6, separator=", "))
             print("Body-to-principal rotation matrix R_P_B [-]:")
-            print(np.array2string(body_to_principal, precision=6, separator=", "))  
+            print(np.array2string(body_to_principal, precision=6, separator=", "))
         return self.inertia_tensor
 
     def compute_dynamic_balance(self) -> np.ndarray:
         """Compute gyrostat rho (momentum) using the least squares solution in class"""
-        
+
         # This is in the body frame
         J = self.inertia_tensor
         omega = self.desired_spin_rate * self.desired_spin_axis
@@ -509,20 +580,20 @@ class Spacecraft:
         s = omega / omega_s
         J_s = s @ J @ s
         J_principal, _ = self.compute_principal_inertia_components()
-        J_eff = self.J_eff * J_principal[2]
+        J_eff = self.J_33_multiplier * J_principal[2]
 
         rho_s = omega_s * (J_eff - J_s)
 
         # Now do the psuedo-inverse to find rho
         omega_hat = skew_symmetric(omega)
         wsps = omega_s * rho_s
-        w_hat_Jw = omega_hat @ self.inertia_tensor @ omega # this is omega x J omega
-        
+        w_hat_Jw = omega_hat @ self.inertia_tensor @ omega  # this is omega x J omega
+
         A = np.vstack([omega, omega_hat])
         b = np.hstack([wsps, -w_hat_Jw])
 
         # Using numpy implementation to speed up the simulation, but this is the same as the notes from class
         # rho = (A .T @ A)^(-1) @ A.T @ b
-        rho, _, _, _= np.linalg.lstsq(A, b, rcond=None) 
+        rho, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
 
         return rho

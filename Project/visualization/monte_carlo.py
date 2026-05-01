@@ -49,7 +49,13 @@ def plot_monte_carlo_component_stack(
         style_time_axis(ax)
         for times, values in trial_series:
             if i < values.shape[1]:
-                ax.plot(times, values[:, i], color=colors[i % len(colors)], alpha=line_alpha, linewidth=1.0)
+                ax.plot(
+                    times,
+                    values[:, i],
+                    color=colors[i % len(colors)],
+                    alpha=line_alpha,
+                    linewidth=1.0,
+                )
         ax.set_ylabel(labels[i])
 
     axes_array[-1].set_xlabel("time [s]")
@@ -103,7 +109,9 @@ def plot_monte_carlo_overview(
         sharex=True,
     )
     axes_array = np.atleast_1d(axes)
-    fig.suptitle("Monte Carlo Trials: State Components", fontsize=16, fontweight="bold", y=0.995)
+    fig.suptitle(
+        "Monte Carlo Trials: State Components", fontsize=16, fontweight="bold", y=0.995
+    )
 
     axis_index = 0
     for group in plot_groups:
@@ -169,7 +177,8 @@ def monte_carlo_plot_paths(
             "overview": output_root / "monte_carlo_components.png",
             "position": output_root / "monte_carlo_position.png",
             "velocity": output_root / "monte_carlo_velocity.png",
-            "attitude": output_root / f"monte_carlo_attitude_{attitude_plot_suffix}.png",
+            "attitude": output_root
+            / f"monte_carlo_attitude_{attitude_plot_suffix}.png",
             "angular_velocity": output_root / "monte_carlo_angular_velocity.png",
             "rho": output_root / "monte_carlo_rho.png",
         }
@@ -209,7 +218,9 @@ def plot_monte_carlo_trials(
     """Overlay all Monte Carlo trials by component with transparent lines."""
 
     runs = summary.get("runs", []) if isinstance(summary, dict) else []
-    valid_runs = [run for run in runs if isinstance(run, dict) and run.get("state_file")]
+    valid_runs = [
+        run for run in runs if isinstance(run, dict) and run.get("state_file")
+    ]
     if not valid_runs:
         raise ValueError("No Monte Carlo state files found in summary")
 
@@ -225,65 +236,93 @@ def plot_monte_carlo_trials(
             history = np.asarray(data["state_history_si"], dtype=float)
         position_trials.append((times, history[:, ctx.idx["POS_ECI"]]))
         velocity_trials.append((times, history[:, ctx.idx["VEL_ECI"]]))
-        attitude_trials.append((times, attitude_plot_values(ctx, history[:, ctx.idx["ATTITUDE"]])))
+        attitude_trials.append(
+            (times, attitude_plot_values(ctx, history[:, ctx.idx["ATTITUDE"]]))
+        )
         omega_trials.append((times, history[:, ctx.idx["ATTITUDE_RATE"]]))
         rho_trials.append((times, history[:, ctx.idx["RHO"]]))
 
-    attitude_suffix = "quaternion" if ctx.attitude_plot_mode == "quaternion" else "euler"
-    summary_root_dir = Path(str(summary.get("root_dir", ctx.config_path.parent / "results")))
-    plot_paths = monte_carlo_plot_paths(ctx, summary_root_dir, save_path, attitude_suffix)
+    attitude_suffix = (
+        "quaternion" if ctx.attitude_plot_mode == "quaternion" else "euler"
+    )
+    summary_root_dir = Path(
+        str(summary.get("root_dir", ctx.config_path.parent / "results"))
+    )
+    plot_paths = monte_carlo_plot_paths(
+        ctx, summary_root_dir, save_path, attitude_suffix
+    )
     plot_groups = []
     if ctx.show_trajectory_plot:
-        plot_groups.append({
-            "title": "Position Components",
-            "labels": ["x [m]", "y [m]", "z [m]"],
-            "colors": ["#2563eb", "#1d4ed8", "#1e40af"],
-            "trial_series": position_trials,
-        })
+        plot_groups.append(
+            {
+                "title": "Position Components",
+                "labels": ["x [m]", "y [m]", "z [m]"],
+                "colors": ["#2563eb", "#1d4ed8", "#1e40af"],
+                "trial_series": position_trials,
+            }
+        )
     if ctx.show_velocity_plot:
-        plot_groups.append({
-            "title": "Velocity Components",
-            "labels": ["vx [m/s]", "vy [m/s]", "vz [m/s]"],
-            "colors": ["#f59e0b", "#d97706", "#b45309"],
-            "trial_series": velocity_trials,
-        })
+        plot_groups.append(
+            {
+                "title": "Velocity Components",
+                "labels": ["vx [m/s]", "vy [m/s]", "vz [m/s]"],
+                "colors": ["#f59e0b", "#d97706", "#b45309"],
+                "trial_series": velocity_trials,
+            }
+        )
     if ctx.show_attitude_plot:
-        plot_groups.append({
-            "title": "Quaternion Components" if ctx.attitude_plot_mode == "quaternion" else "Euler Angle Components",
-            "labels": (
-                ["q0 [-]", "q1 [-]", "q2 [-]", "q3 [-]"]
+        plot_groups.append(
+            {
+                "title": "Quaternion Components"
                 if ctx.attitude_plot_mode == "quaternion"
-                else ["roll [deg]", "pitch [deg]", "yaw [deg]"]
-            ),
-            "colors": ["#7c3aed", "#db2777", "#0ea5e9", "#16a34a"],
-            "trial_series": attitude_trials,
-            "overlay": ctx.attitude_plot_layout == "overlay",
-            "ylabel": "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]",
-        })
+                else "Euler Angle Components",
+                "labels": (
+                    ["q0 [-]", "q1 [-]", "q2 [-]", "q3 [-]"]
+                    if ctx.attitude_plot_mode == "quaternion"
+                    else ["roll [deg]", "pitch [deg]", "yaw [deg]"]
+                ),
+                "colors": ["#7c3aed", "#db2777", "#0ea5e9", "#16a34a"],
+                "trial_series": attitude_trials,
+                "overlay": ctx.attitude_plot_layout == "overlay",
+                "ylabel": "quaternion [-]"
+                if ctx.attitude_plot_mode == "quaternion"
+                else "angle [deg]",
+            }
+        )
     if ctx.show_angular_velocity_plot:
-        plot_groups.append({
-            "title": "Angular Velocity Components",
-            "labels": ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"],
-            "colors": ["#2563eb", "#f97316", "#059669"],
-            "trial_series": omega_trials,
-            "overlay": ctx.attitude_plot_layout == "overlay",
-            "ylabel": "angular velocity [rad/s]",
-        })
+        plot_groups.append(
+            {
+                "title": "Angular Velocity Components",
+                "labels": ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"],
+                "colors": ["#2563eb", "#f97316", "#059669"],
+                "trial_series": omega_trials,
+                "overlay": ctx.attitude_plot_layout == "overlay",
+                "ylabel": "angular velocity [rad/s]",
+            }
+        )
     if ctx.show_gyrostat_components:
-        plot_groups.append({
-            "title": "Gyrostat Momentum Components",
-            "labels": ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
-            "colors": ["#7c2d12", "#be123c", "#4338ca"],
-            "trial_series": rho_trials,
-            "overlay": ctx.attitude_plot_layout == "overlay",
-            "ylabel": "rho [kg m^2/s]",
-        })
+        plot_groups.append(
+            {
+                "title": "Gyrostat Momentum Components",
+                "labels": ["rho_x [kg m^2/s]", "rho_y [kg m^2/s]", "rho_z [kg m^2/s]"],
+                "colors": ["#7c2d12", "#be123c", "#4338ca"],
+                "trial_series": rho_trials,
+                "overlay": ctx.attitude_plot_layout == "overlay",
+                "ylabel": "rho [kg m^2/s]",
+            }
+        )
     if not plot_groups:
         return {}
 
     if ctx.plot_layout == "together":
         fig = plot_monte_carlo_overview(plot_groups, line_alpha)
-        save_figure(ctx.logger, fig, plot_paths["overview"], "Monte Carlo component plot saved", dpi=180)
+        save_figure(
+            ctx.logger,
+            fig,
+            plot_paths["overview"],
+            "Monte Carlo component plot saved",
+            dpi=180,
+        )
 
         if show:
             plt.show()
@@ -317,8 +356,12 @@ def plot_monte_carlo_trials(
                     else ["roll [deg]", "pitch [deg]", "yaw [deg]"]
                 ),
                 ["#7c3aed", "#db2777", "#0ea5e9", "#16a34a"],
-                "Quaternion Components" if ctx.attitude_plot_mode == "quaternion" else "Euler Angle Components",
-                "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]",
+                "Quaternion Components"
+                if ctx.attitude_plot_mode == "quaternion"
+                else "Euler Angle Components",
+                "quaternion [-]"
+                if ctx.attitude_plot_mode == "quaternion"
+                else "angle [deg]",
                 line_alpha,
             )
             if ctx.attitude_plot_layout == "overlay"
@@ -330,7 +373,9 @@ def plot_monte_carlo_trials(
                     else ["roll [deg]", "pitch [deg]", "yaw [deg]"]
                 ),
                 ["#7c3aed", "#db2777", "#0ea5e9", "#16a34a"],
-                "Quaternion Components" if ctx.attitude_plot_mode == "quaternion" else "Euler Angle Components",
+                "Quaternion Components"
+                if ctx.attitude_plot_mode == "quaternion"
+                else "Euler Angle Components",
                 line_alpha,
             )
         )
@@ -373,11 +418,29 @@ def plot_monte_carlo_trials(
             )
         )
     if "position" in figures:
-        save_figure(ctx.logger, figures["position"], plot_paths["position"], "Monte Carlo position plot saved", dpi=180)
+        save_figure(
+            ctx.logger,
+            figures["position"],
+            plot_paths["position"],
+            "Monte Carlo position plot saved",
+            dpi=180,
+        )
     if "velocity" in figures:
-        save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Monte Carlo velocity plot saved", dpi=180)
+        save_figure(
+            ctx.logger,
+            figures["velocity"],
+            plot_paths["velocity"],
+            "Monte Carlo velocity plot saved",
+            dpi=180,
+        )
     if "attitude" in figures:
-        save_figure(ctx.logger, figures["attitude"], plot_paths["attitude"], "Monte Carlo attitude plot saved", dpi=180)
+        save_figure(
+            ctx.logger,
+            figures["attitude"],
+            plot_paths["attitude"],
+            "Monte Carlo attitude plot saved",
+            dpi=180,
+        )
     if "angular_velocity" in figures:
         save_figure(
             ctx.logger,
@@ -387,7 +450,13 @@ def plot_monte_carlo_trials(
             dpi=180,
         )
     if "rho" in figures:
-        save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Monte Carlo gyrostat momentum plot saved", dpi=180)
+        save_figure(
+            ctx.logger,
+            figures["rho"],
+            plot_paths["rho"],
+            "Monte Carlo gyrostat momentum plot saved",
+            dpi=180,
+        )
 
     if show:
         plt.show()

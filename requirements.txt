@@ -3,3 +3,5 @@ matplotlib
 numpy
 pyyaml
 scipy
+spiceypy
+ppigrf

@@ -17,8 +17,8 @@ from .common import (
     set_equal_orbit_axes,
     style_time_axis,
 )
-from world.math import R_body_to_inertial, quaternion_to_euler
-from world.models.constants import RADIUS_EARTH
+from world.rotations_and_transformations import R_body_to_inertial, quaternion_to_euler
+from world.models.constants import EARTH_RADIUS_KM
 
 
 class SimulationPlotContext(Protocol):
@@ -39,10 +39,9 @@ class SimulationPlotContext(Protocol):
     logger: logging.Logger
 
 
-EARTH_RADIUS_KM = RADIUS_EARTH / 1_000.0
-
-
-def attitude_plot_values(ctx: SimulationPlotContext, attitudes: np.ndarray) -> np.ndarray:
+def attitude_plot_values(
+    ctx: SimulationPlotContext, attitudes: np.ndarray
+) -> np.ndarray:
     attitude_history = np.asarray(attitudes, dtype=float)
     if ctx.attitude_plot_mode == "quaternion":
         return attitude_history
@@ -55,7 +54,9 @@ def attitude_plot_values(ctx: SimulationPlotContext, attitudes: np.ndarray) -> n
     )
 
 
-def attitude_plot_spec(ctx: SimulationPlotContext, attitudes: np.ndarray) -> dict[str, object]:
+def attitude_plot_spec(
+    ctx: SimulationPlotContext, attitudes: np.ndarray
+) -> dict[str, object]:
     if ctx.attitude_plot_mode == "quaternion":
         return {
             "values": attitude_plot_values(ctx, attitudes),
@@ -168,7 +169,14 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     ax = fig.add_subplot(1, 1, 1, projection="3d")
     ax.set_facecolor(AXIS_FACE_COLOR)
     # plot_earth_sphere(ax)
-    ax.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=1.4, color="#FF781F", alpha=1.00)
+    ax.plot(
+        pos_km[:, 0],
+        pos_km[:, 1],
+        pos_km[:, 2],
+        linewidth=1.4,
+        color="#FF781F",
+        alpha=1.00,
+    )
     ax.scatter(
         pos_km[0, 0],
         pos_km[0, 1],
@@ -246,7 +254,9 @@ def plot_sun_safe_mode_axis_figure(
     safe_axis_eci: np.ndarray,
     alignment_angle_deg: np.ndarray,
 ) -> plt.Figure:
-    fig, axes = plt.subplots(2, 1, figsize=(12, 7), facecolor=FIGURE_FACE_COLOR, sharex=True)
+    fig, axes = plt.subplots(
+        2, 1, figsize=(12, 7), facecolor=FIGURE_FACE_COLOR, sharex=True
+    )
     safe_colors = ["#dc2626", "#16a34a", "#2563eb"]
     sun_colors = ["#f97316", "#84cc16", "#38bdf8"]
     labels = ["x", "y", "z"]
@@ -308,7 +318,9 @@ def plot_component_stack(
 
     for i, ax in enumerate(axes_array):
         style_time_axis(ax)
-        ax.plot(times, component_values[:, i], linewidth=1.6, color=colors[i % len(colors)])
+        ax.plot(
+            times, component_values[:, i], linewidth=1.6, color=colors[i % len(colors)]
+        )
         ax.set_ylabel(labels[i])
 
     axes_array[-1].set_xlabel("time [s]")
@@ -358,7 +370,9 @@ def plot_simulation_overview(
     att_values = np.asarray(attitude_spec["values"], dtype=float)
     att_labels = list(attitude_spec["labels"])
     att_colors = list(attitude_spec["colors"])
-    angle_ylabel = "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]"
+    angle_ylabel = (
+        "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]"
+    )
     omega_colors = ["#2563eb", "#f97316", "#059669"]
     omega_labels = ["wx [rad/s]", "wy [rad/s]", "wz [rad/s]"]
     rho_colors = ["#7c2d12", "#be123c", "#4338ca"]
@@ -379,7 +393,14 @@ def plot_simulation_overview(
     ax_orbit = fig.add_subplot(gs[0, 0], projection="3d")
     ax_orbit.set_facecolor(AXIS_FACE_COLOR)
     # plot_earth_sphere(ax_orbit)
-    ax_orbit.plot(pos_km[:, 0], pos_km[:, 1], pos_km[:, 2], linewidth=2.2, color="#FF781F", alpha=0.95)
+    ax_orbit.plot(
+        pos_km[:, 0],
+        pos_km[:, 1],
+        pos_km[:, 2],
+        linewidth=2.2,
+        color="#FF781F",
+        alpha=0.95,
+    )
     ax_orbit.scatter(
         pos_km[0, 0],
         pos_km[0, 1],
@@ -427,7 +448,13 @@ def plot_simulation_overview(
         ax_att = fig.add_subplot(component_gs[0, 0])
         style_time_axis(ax_att)
         for i in range(att_values.shape[1]):
-            ax_att.plot(times, att_values[:, i], linewidth=1.5, color=att_colors[i], label=att_labels[i])
+            ax_att.plot(
+                times,
+                att_values[:, i],
+                linewidth=1.5,
+                color=att_colors[i],
+                label=att_labels[i],
+            )
         ax_att.set_title(str(attitude_spec["title"]))
         ax_att.set_ylabel(angle_ylabel)
         ax_att.legend(loc="upper right")
@@ -474,7 +501,13 @@ def plot_simulation_overview(
         for i in range(att_values.shape[1]):
             ax = fig.add_subplot(component_gs[i, 0])
             style_time_axis(ax)
-            ax.plot(times, att_values[:, i], linewidth=1.4, color=att_colors[i], label=att_labels[i])
+            ax.plot(
+                times,
+                att_values[:, i],
+                linewidth=1.4,
+                color=att_colors[i],
+                label=att_labels[i],
+            )
             ax.set_ylabel(att_labels[i])
             if i == 0:
                 ax.set_title(str(attitude_spec["title"]))
@@ -539,10 +572,14 @@ def plot_simulation(
     att_rate = history[:, ctx.idx["ATTITUDE_RATE"]]
     rho = history[:, ctx.idx["RHO"]]
     current_attitude_spec = attitude_plot_spec(ctx, att)
-    plot_paths = simulation_plot_paths(ctx, save_path, str(current_attitude_spec["filename"]))
+    plot_paths = simulation_plot_paths(
+        ctx, save_path, str(current_attitude_spec["filename"])
+    )
     sun_safe_mode_axis_fig = None
     if ctx.show_sun_safe_mode_axis_plot:
-        sun_eci, safe_axis_eci, alignment_angle_deg = sun_safe_mode_axis_values(ctx, att)
+        sun_eci, safe_axis_eci, alignment_angle_deg = sun_safe_mode_axis_values(
+            ctx, att
+        )
         sun_safe_mode_axis_fig = plot_sun_safe_mode_axis_figure(
             times,
             sun_eci,
@@ -553,8 +590,12 @@ def plot_simulation(
     if ctx.plot_layout == "together":
         fig = None
         if ctx.show_simulation_overview:
-            fig = plot_simulation_overview(ctx, times, pos_km, vel_kms, current_attitude_spec, att_rate, rho)
-            save_figure(ctx.logger, fig, plot_paths["overview"], "Simulation plot saved")
+            fig = plot_simulation_overview(
+                ctx, times, pos_km, vel_kms, current_attitude_spec, att_rate, rho
+            )
+            save_figure(
+                ctx.logger, fig, plot_paths["overview"], "Simulation plot saved"
+            )
         if sun_safe_mode_axis_fig is not None:
             save_figure(
                 ctx.logger,
@@ -581,7 +622,9 @@ def plot_simulation(
                 list(current_attitude_spec["labels"]),
                 list(current_attitude_spec["colors"]),
                 str(current_attitude_spec["title"]),
-                "quaternion [-]" if ctx.attitude_plot_mode == "quaternion" else "angle [deg]",
+                "quaternion [-]"
+                if ctx.attitude_plot_mode == "quaternion"
+                else "angle [deg]",
             )
             if ctx.attitude_plot_layout == "overlay"
             else plot_component_stack(
@@ -633,11 +676,26 @@ def plot_simulation(
             )
         )
     if "trajectory" in figures:
-        save_figure(ctx.logger, figures["trajectory"], plot_paths["trajectory"], "Trajectory plot saved")
+        save_figure(
+            ctx.logger,
+            figures["trajectory"],
+            plot_paths["trajectory"],
+            "Trajectory plot saved",
+        )
     if "velocity" in figures:
-        save_figure(ctx.logger, figures["velocity"], plot_paths["velocity"], "Velocity plot saved")
+        save_figure(
+            ctx.logger,
+            figures["velocity"],
+            plot_paths["velocity"],
+            "Velocity plot saved",
+        )
     if "attitude" in figures:
-        save_figure(ctx.logger, figures["attitude"], plot_paths["attitude"], "Attitude plot saved")
+        save_figure(
+            ctx.logger,
+            figures["attitude"],
+            plot_paths["attitude"],
+            "Attitude plot saved",
+        )
     if "angular_velocity" in figures:
         save_figure(
             ctx.logger,
@@ -653,7 +711,12 @@ def plot_simulation(
             "Sun safe-mode axis plot saved",
         )
     if "rho" in figures:
-        save_figure(ctx.logger, figures["rho"], plot_paths["rho"], "Gyrostat momentum plot saved")
+        save_figure(
+            ctx.logger,
+            figures["rho"],
+            plot_paths["rho"],
+            "Gyrostat momentum plot saved",
+        )
 
     if show:
         plt.show()

@@ -35,16 +35,18 @@ def plot_momentum_sphere(
     rho = history[:, ctx.idx["RHO"]]
     inertia_tensor = ctx.spacecraft.inertia_tensor
 
-    h_body = (inertia_tensor @ w.T).T + rho # From lecture notes
+    h_body = (inertia_tensor @ w.T).T + rho  # From lecture notes
     h_magnitude = np.linalg.norm(h_body, axis=1)
     h_norm = h_magnitude[:, np.newaxis]
     h_norm[h_norm == 0.0] = 1.0
-    momentum_path = h_body / h_norm 
+    momentum_path = h_body / h_norm
     momentum_history = momentum_path.T
     principal_moments, principal_axes = np.linalg.eigh(inertia_tensor)
     inertia_inverse = np.linalg.inv(inertia_tensor)
     nonzero_magnitudes = h_magnitude[h_magnitude > 0.0]
-    reference_h_magnitude = float(np.mean(nonzero_magnitudes)) if nonzero_magnitudes.size else 1.0
+    reference_h_magnitude = (
+        float(np.mean(nonzero_magnitudes)) if nonzero_magnitudes.size else 1.0
+    )
 
     surface_resolution = 100
     u = np.linspace(-np.pi, np.pi, 1000)
@@ -56,11 +58,15 @@ def plot_momentum_sphere(
     y = 0.95 * np.sin(U) * np.sin(V)
     z = 0.95 * np.cos(V)
     sphere_directions = np.stack((x, y, z), axis=-1)
-    energy_field = 0.5 * reference_h_magnitude**2 * np.einsum(
-        "...i,ij,...j->...",
-        sphere_directions,
-        inertia_inverse,
-        sphere_directions,
+    energy_field = (
+        0.5
+        * reference_h_magnitude**2
+        * np.einsum(
+            "...i,ij,...j->...",
+            sphere_directions,
+            inertia_inverse,
+            sphere_directions,
+        )
     )
     energy_min = float(np.min(energy_field))
     energy_max = float(np.max(energy_field))
@@ -157,7 +163,12 @@ def plot_momentum_sphere(
     ax.set_ylabel("Ly / ||L|| [-]")
     ax.set_zlabel("Lz / ||L|| [-]")
     ax.set_box_aspect((1.0, 1.0, 1.0))
-    ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(0.02, 0.98), fontsize=8)
+    ax.legend(
+        handles=legend_handles,
+        loc="upper left",
+        bbox_to_anchor=(0.02, 0.98),
+        fontsize=8,
+    )
     colorbar = fig.colorbar(
         plt.cm.ScalarMappable(norm=energy_norm, cmap=energy_cmap),
         ax=ax,
@@ -169,7 +180,9 @@ def plot_momentum_sphere(
 
     output_path = save_path
     if output_path is None:
-        output_path = default_plot_dir(ctx.output_dir, ctx.config_path) / "momentum_sphere.png"
+        output_path = (
+            default_plot_dir(ctx.output_dir, ctx.config_path) / "momentum_sphere.png"
+        )
 
     save_figure(ctx.logger, fig, output_path, "Momentum sphere plot saved")
 

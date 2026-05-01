@@ -62,7 +62,7 @@ safe_mode_properties:
   - name: desired_spin_rate
     value: 1.0407409737537963 # rad/s
 
-  - name: J_eff
+  - name: J_33_multiplier
     value: 1.2 # relative to principal J33 (i.e. J_eff = 1.2 means J_eff is 20% larger than the largest principal moment of inertia)
 
 physical_properties:
@@ -205,6 +205,26 @@ integration_properties:
   # For future use in the potential of using a different integration scheme
   - name: integration_method
     value: rk4
+
+sensor_properties:
+
+  magnetometer:
+    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # T^2
+
+  gyroscope:
+    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # (rad/s)^2
+    bias: [0.0, 0.0, 0.0] # rad/s
+
+  accelerometer:
+    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # (m/s^2)^2
+    bias: [0.0, 0.0, 0.0] # m/s^2
+
+  sun_sensor:
+    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # unit-vector covariance
+
+  visual_camera:
+    field_of_view_deg: 75.0
+    covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # bearing-vector covariance
 
 plotting_properties:
 
