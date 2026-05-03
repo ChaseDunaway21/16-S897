@@ -20,11 +20,17 @@ from visualization import (
     plot_monte_carlo_trials as build_monte_carlo_plots,
     plot_simulation as build_simulation_plots,
 )
-from sensors import Accelerometer, Gyroscope, Magnetometer, SunSensor, VisualCamera
 from world.models.constants import MU_EARTH
 from world.dynamics import integrate_dynamics
 import world.models.gravity as gravity
 from world.models.sun import SunModel
+from world.sensors import (
+    Accelerometer,
+    Gyroscope,
+    Magnetometer,
+    SunSensor,
+    VisualCamera,
+)
 from world.spacecraft import Spacecraft
 
 

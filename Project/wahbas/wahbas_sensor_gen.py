@@ -8,9 +8,9 @@ from typing import Any
 import numpy as np
 import yaml
 
-from sensors import Magnetometer, SunSensor, VisualCamera
 from world.math import unit
 from world.models.sun import SunModel
+from world.sensors import Magnetometer, SunSensor, VisualCamera
 from world.spacecraft import Spacecraft
 
 
