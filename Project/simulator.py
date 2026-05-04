@@ -20,6 +20,7 @@ from visualization import (
     plot_monte_carlo_trials as build_monte_carlo_plots,
     plot_simulation as build_simulation_plots,
 )
+from world.estimator import MEKF
 from world.models.constants import MU_EARTH
 from world.dynamics import integrate_dynamics
 import world.models.gravity as gravity
@@ -62,6 +63,7 @@ def _run_single_monte_carlo_trial(
         "log_file": str(result["log_file"]),
         "state_file": str(state_file),
         "sensor_file": result.get("sensor_history_file"),
+        "estimator_file": result.get("estimator_history_file"),
         "num_steps": int(result["num_steps"]),
         "final_position_m": final_state[idx["POS_ECI"]].tolist(),
         "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
@@ -202,6 +204,11 @@ class Simulator:
             "show_camera_measurement_plot",
             True,
         )
+        self.show_estimator_plot = self._property_bool(
+            plotting_properties,
+            "show_estimator_plot",
+            True,
+        )
         self.show_momentum_sphere_plot = self._property_bool(
             plotting_properties,
             "show_momentum_sphere_plot",
@@ -224,6 +231,7 @@ class Simulator:
                 self.single_run_seed,
             )
         self._setup_sensors()
+        self._setup_estimator()
 
     @staticmethod
     def _property_value(
@@ -310,6 +318,7 @@ class Simulator:
         if self._config_bool(magnetometer_cfg.get("enabled"), True):
             self.sensor_models["magnetometer"] = Magnetometer(
                 covariance=magnetometer_cfg.get("covariance"),
+                bias=magnetometer_cfg.get("bias"),
                 rng=np.random.default_rng(base_seed + 1),
             )
             self.sensor_update_periods["magnetometer"] = self._sensor_update_period(
@@ -321,6 +330,7 @@ class Simulator:
             self.sensor_models["gyroscope"] = Gyroscope(
                 covariance=gyroscope_cfg.get("covariance"),
                 bias=gyroscope_cfg.get("bias"),
+                bias_random_walk_sigma=gyroscope_cfg.get("bias_random_walk_sigma"),
                 rng=np.random.default_rng(base_seed + 2),
             )
             self.sensor_update_periods["gyroscope"] = self._sensor_update_period(
@@ -350,6 +360,7 @@ class Simulator:
             self.sensor_models["sun_sensor"] = SunSensor(
                 sun_model=sun_model,
                 covariance=sun_sensor_cfg.get("covariance"),
+                bias=sun_sensor_cfg.get("bias"),
                 rng=np.random.default_rng(base_seed + 4),
                 return_none_if_eclipsed=self._config_bool(
                     sun_sensor_cfg.get("return_none_if_eclipsed"), True
@@ -362,14 +373,8 @@ class Simulator:
         visual_camera_cfg = sensor_properties.get("visual_camera", {}) or {}
         if self._config_bool(visual_camera_cfg.get("enabled"), True):
             self.sensor_models["visual_camera"] = VisualCamera(
-                boresight_body=np.asarray(
-                    visual_camera_cfg.get("boresight_body", [1.0, 0.0, 0.0]),
-                    dtype=float,
-                ),
-                field_of_view_rad=np.deg2rad(
-                    float(visual_camera_cfg.get("field_of_view_deg", 75.0))
-                ),
                 covariance=visual_camera_cfg.get("covariance"),
+                bias=visual_camera_cfg.get("bias"),
                 rng=np.random.default_rng(base_seed + 5),
             )
             # For now the target is just the center of the Earth
@@ -384,11 +389,67 @@ class Simulator:
         enabled = ", ".join(self.sensor_models) if self.sensor_models else "none"
         self.logger.info("Enabled sensors: %s", enabled)
 
+    def _setup_estimator(self) -> None:
+        estimator_cfg = self.cfg.get("estimator_properties", {}) or {}
+        self.estimator_enabled = False
+        self.estimator: MEKF | None = None
+        self.estimator_records: dict[str, list] = {
+            "times_s": [],
+            "states": [],
+            "sigmas": [],
+        }
+        self.latest_gyro_measurement: np.ndarray | None = None
+
+        if not isinstance(estimator_cfg, dict):
+            return
+        if not self._config_bool(estimator_cfg.get("enabled"), False):
+            return
+
+        self.estimator_enabled = True
+        self.estimator = MEKF(
+            sigma_initial_attitude=float(
+                estimator_cfg.get("sigma_initial_attitude", 0.0)
+            ),
+            sigma_initial_gyro_bias=float(
+                estimator_cfg.get("sigma_initial_gyro_bias", 0.0)
+            ),
+            sigma_gyro_white=float(estimator_cfg.get("sigma_gyro_white", 0.0)),
+            sigma_gyro_bias_deriv=float(
+                estimator_cfg.get("sigma_gyro_bias_deriv", 0.0)
+            ),
+            sigma_sunsensor_direction=float(
+                estimator_cfg.get("sigma_sunsensor_direction", 0.0)
+            ),
+            sigma_magnetometer_direction=float(
+                estimator_cfg.get("sigma_magnetometer_direction", 0.0)
+            ),
+        )
+
+        current_state = self.spacecraft.get_state()
+        estimator_state = np.zeros(7, dtype=float)
+        estimator_state[0:4] = np.asarray(
+            estimator_cfg.get(
+                "initial_attitude",
+                current_state[self.idx["ATTITUDE"]],
+            ),
+            dtype=float,
+        )
+        estimator_state[4:7] = np.asarray(
+            estimator_cfg.get("initial_gyro_bias", [0.0, 0.0, 0.0]),
+            dtype=float,
+        )
+        self.estimator.set_state(estimator_state)
+        self.logger.info("MEKF estimator enabled")
+
     def _reset_sensor_records(self) -> None:
         self.sensor_records = {
             name: {"times_s": [], "measurements": []} for name in self.sensor_models
         }
         self.sensor_next_update_times = {name: 0.0 for name in self.sensor_models}
+
+    def _reset_estimator_records(self) -> None:
+        self.estimator_records = {"times_s": [], "states": [], "sigmas": []}
+        self.latest_gyro_measurement = None
 
     def _sensor_measurement(
         self, sensor_name: str, sensor_model: object, state: np.ndarray, time_s: float
@@ -407,11 +468,60 @@ class Simulator:
             )
         return sensor_model.get_measurement(state, self.idx, time_s)
 
-    def _record_due_sensor_measurements(self, state: np.ndarray, time_s: float) -> None:
-        for sensor_name, sensor_model in self.sensor_models.items():
-            if time_s + 1e-12 < self.sensor_next_update_times[sensor_name]:
-                continue
+    def _update_estimator(
+        self,
+        sensor_name: str,
+        sensor_model: object,
+        measurement: np.ndarray | None,
+        state: np.ndarray,
+        time_s: float,
+    ) -> bool:
+        if not self.estimator_enabled or self.estimator is None:
+            return False
+        if measurement is None:
+            return False
 
+        measurement_array = np.asarray(measurement, dtype=float).reshape(-1)
+        if not np.isfinite(measurement_array).all():
+            return False
+
+        position = state[self.idx["POS_ECI"]]
+        if sensor_name == "gyroscope":
+            self.latest_gyro_measurement = measurement_array.copy()
+            self.estimator.predict(measurement_array, time_s)
+            return True
+
+        if self.latest_gyro_measurement is not None:
+            self.estimator.predict(self.latest_gyro_measurement, time_s)
+
+        # The vector measurements are instantaneous at time_s, so the attitude
+        # must be propagated to time_s before applying their correction.
+        if sensor_name == "magnetometer":
+            b_eci = sensor_model.magnetic_field_model.field_eci(position, time_s)
+            self.estimator.Bfield_update(measurement_array, b_eci)
+            return True
+        elif sensor_name == "sun_sensor":
+            sun_eci = sensor_model.sun_model.direction_eci(position, time_s)
+            self.estimator.sun_sensor_update(measurement_array, sun_eci)
+            return True
+        elif sensor_name == "visual_camera":
+            target_eci = self.sensor_targets["visual_camera"]
+            self.estimator.vector_update(measurement_array, target_eci - position)
+            return True
+
+        return False
+
+    def _record_due_sensor_measurements(self, state: np.ndarray, time_s: float) -> bool:
+        due_names = [
+            sensor_name
+            for sensor_name in self.sensor_models
+            if time_s + 1e-12 >= self.sensor_next_update_times[sensor_name]
+        ]
+        due_names.sort(key=lambda name: 0 if name == "gyroscope" else 1)
+
+        estimator_updated = False
+        for sensor_name in due_names:
+            sensor_model = self.sensor_models[sensor_name]
             measurement = self._sensor_measurement(
                 sensor_name, sensor_model, state, time_s
             )
@@ -419,11 +529,26 @@ class Simulator:
 
             self.sensor_records[sensor_name]["times_s"].append(float(time_s))
             self.sensor_records[sensor_name]["measurements"].append(measurement_array)
+            estimator_updated = (
+                self._update_estimator(
+                    sensor_name, sensor_model, measurement, state, time_s
+                )
+                or estimator_updated
+            )
 
             while self.sensor_next_update_times[sensor_name] <= time_s + 1e-12:
                 self.sensor_next_update_times[sensor_name] += (
                     self.sensor_update_periods[sensor_name]
                 )
+
+        return estimator_updated
+
+    def _record_estimator_state(self, time_s: float) -> None:
+        if not self.estimator_enabled or self.estimator is None:
+            return
+        self.estimator_records["times_s"].append(float(time_s))
+        self.estimator_records["states"].append(self.estimator.get_state())
+        self.estimator_records["sigmas"].append(self.estimator.get_uncertainty_sigma())
 
     def _sensor_history_arrays(self) -> dict[str, dict[str, np.ndarray]]:
         sensor_history = {}
@@ -438,6 +563,25 @@ class Simulator:
                 "measurements": measurement_array,
             }
         return sensor_history
+
+    def _estimator_history_arrays(self) -> dict[str, np.ndarray]:
+        if not self.estimator_enabled:
+            return {}
+        states = self.estimator_records["states"]
+        sigmas = self.estimator_records["sigmas"]
+        return {
+            "times_s": np.asarray(self.estimator_records["times_s"], dtype=float),
+            "state_estimates": (
+                np.asarray(states, dtype=float)
+                if states
+                else np.empty((0, 7), dtype=float)
+            ),
+            "error_sigmas": (
+                np.asarray(sigmas, dtype=float)
+                if sigmas
+                else np.empty((0, 6), dtype=float)
+            ),
+        }
 
     def _save_sensor_history(
         self, sensor_history: dict[str, dict[str, np.ndarray]]
@@ -454,6 +598,17 @@ class Simulator:
         np.savez_compressed(sensor_file, **payload)
         self.logger.info("Sensor history saved: %s", sensor_file)
         return sensor_file
+
+    def _save_estimator_history(
+        self, estimator_history: dict[str, np.ndarray]
+    ) -> Path | None:
+        if not estimator_history:
+            return None
+
+        estimator_file = self.output_dir / "estimator_history.npz"
+        np.savez_compressed(estimator_file, **estimator_history)
+        self.logger.info("Estimator history saved: %s", estimator_file)
+        return estimator_file
 
     @staticmethod
     def _sample_with_uncertainty(
@@ -676,7 +831,9 @@ class Simulator:
         history = np.zeros((num_steps + 1, state.size), dtype=float)
         history[0] = state
         self._reset_sensor_records()
+        self._reset_estimator_records()
         self._record_due_sensor_measurements(state, 0.0)
+        self._record_estimator_state(0.0)
 
         if show_progress:
             self._print_progress("Simulation", 0, num_steps, "steps")
@@ -692,7 +849,8 @@ class Simulator:
             t += self.dt
             times[k] = t
             history[k] = state
-            self._record_due_sensor_measurements(state, t)
+            if self._record_due_sensor_measurements(state, t):
+                self._record_estimator_state(t)
 
             if show_progress:
                 self._print_progress("Simulation", k, num_steps, "steps")
@@ -725,6 +883,8 @@ class Simulator:
         self.logger.info("Log file saved: %s", self.log_file)
         sensor_history = self._sensor_history_arrays()
         sensor_history_file = self._save_sensor_history(sensor_history)
+        estimator_history = self._estimator_history_arrays()
+        estimator_history_file = self._save_estimator_history(estimator_history)
 
         return {
             "times_s": times,
@@ -737,6 +897,10 @@ class Simulator:
             "sensor_measurements": sensor_history,
             "sensor_history_file": (
                 None if sensor_history_file is None else str(sensor_history_file)
+            ),
+            "estimator_history": estimator_history,
+            "estimator_history_file": (
+                None if estimator_history_file is None else str(estimator_history_file)
             ),
         }
 

@@ -11,7 +11,7 @@ simulation_properties:
     value: 0.1 # seconds
 
   - name: max_simulation_time
-    value: 600.0 # seconds
+    value: 200.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -43,7 +43,7 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: random # a specified quaternion, safe_mode, or random
+    value: safe_mode # a specified quaternion, safe_mode, or random
 
   - name: attitude_rate
     value: [-0.1, -0.1, 0.5] # rad/s (10 rpm), This applies to non-montecarlo runs
@@ -217,13 +217,15 @@ sensor_properties:
   magnetometer:
     enabled: True
     update_rate_hz: 1.0
+    bias: [0.0, 0.0, 0.0] # uT
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # uT^2
 
   gyroscope:
     enabled: True
     update_rate_hz: 5.0
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # (rad/s)^2
-    bias: [0.0, 0.0, 0.0] # rad/s
+    bias: [0.0, 0.0, 0.0] # initial b(t), rad/s
+    bias_random_walk_sigma: [0.0, 0.0, 0.0] # (rad/s)/sqrt(s)
 
   accelerometer:
     enabled: False
@@ -234,15 +236,25 @@ sensor_properties:
   sun_sensor:
     enabled: True
     update_rate_hz: 0.1
+    bias: [0.0, 0.0, 0.0] # unit-vector bias
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # unit-vector covariance
 
   visual_camera:
     enabled: True
     update_rate_hz: 0.01
-    boresight_body: [1.0, 0.0, 0.0]
     target_position_eci: [0.0, 0.0, 0.0] # m
-    field_of_view_deg: 75.0
+    bias: [0.0, 0.0, 0.0] # bearing-vector bias
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # bearing-vector covariance
+
+estimator_properties:
+  enabled: True
+  sigma_initial_attitude: 0.1 # rad
+  sigma_initial_gyro_bias: 0.01 # rad/s
+  sigma_gyro_white: 0.001 # rad/sqrt(s)
+  sigma_gyro_bias_deriv: 0.00001 # (rad/s)/sqrt(s)
+  sigma_sunsensor_direction: 0.01 # rad
+  sigma_magnetometer_direction: 0.01 # rad
+  initial_gyro_bias: [0.0, 0.0, 0.0] # rad/s
 
 plotting_properties:
 
@@ -283,6 +295,9 @@ plotting_properties:
     value: True
 
   - name: show_camera_measurement_plot
+    value: True
+
+  - name: show_estimator_plot
     value: True
 
   - name: show_momentum_sphere_plot

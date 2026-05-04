@@ -6,3 +6,4 @@ scipy
 spiceypy
 ppigrf
 cyipopt
+pre-commit

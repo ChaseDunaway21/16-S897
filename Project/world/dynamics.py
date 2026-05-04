@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from world.math import skew_symmetric
-from world.rotations_and_transformations import attitude_jacobian
+from world.rotations_and_transformations import attitude_jacobian as G
 import world.models.gravity as gravity
 
 
@@ -49,7 +49,7 @@ def attitude_dynamics(
     w = state[attitude_rate_slice]
     rho = state[state_index["RHO"]]
 
-    qdot = 0.5 * attitude_jacobian(q) @ w  # Attitude Jacobian from Notes
+    qdot = 0.5 * G(q) @ w  # Attitude Jacobian from Notes
 
     # Using the numpy solver to speed up the simulation, but this is the same as the notes (no gyrostats, tau = 0):
     # First, convert J into the principal components frame

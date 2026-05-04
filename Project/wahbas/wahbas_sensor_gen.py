@@ -27,7 +27,7 @@ def random_quaternion(rng: np.random.Generator) -> np.ndarray:
     return q / np.linalg.norm(q)
 
 
-def enabled_wahba_sensors( # Only the vector sensors can be used, so all but the gyro for ARGUS
+def enabled_wahba_sensors(  # Only the vector sensors can be used, so all but the gyro for ARGUS
     cfg: dict[str, Any], spacecraft: Spacecraft, rng: np.random.Generator
 ) -> tuple[dict[str, object], dict[str, np.ndarray]]:
     sensor_cfg = cfg.get("sensor_properties", {}) or {}
@@ -42,6 +42,7 @@ def enabled_wahba_sensors( # Only the vector sensors can be used, so all but the
     if config_bool(magnetometer_cfg.get("enabled"), True):
         sensors["magnetometer"] = Magnetometer(
             covariance=magnetometer_cfg.get("covariance"),
+            bias=magnetometer_cfg.get("bias"),
             rng=rng,
         )
 
@@ -55,6 +56,7 @@ def enabled_wahba_sensors( # Only the vector sensors can be used, so all but the
                 require_spice=config_bool(sun_sensor_cfg.get("require_spice")),
             ),
             covariance=sun_sensor_cfg.get("covariance"),
+            bias=sun_sensor_cfg.get("bias"),
             rng=rng,
             return_none_if_eclipsed=config_bool(
                 sun_sensor_cfg.get("return_none_if_eclipsed"),
@@ -66,14 +68,8 @@ def enabled_wahba_sensors( # Only the vector sensors can be used, so all but the
     camera_cfg = sensor_cfg.get("visual_camera", {}) or {}
     if config_bool(camera_cfg.get("enabled"), True):
         sensors["visual_camera"] = VisualCamera(
-            boresight_body=np.asarray(
-                camera_cfg.get("boresight_body", [1.0, 0.0, 0.0]),
-                dtype=float,
-            ),
-            field_of_view_rad=np.deg2rad(
-                float(camera_cfg.get("field_of_view_deg", 75.0))
-            ),
             covariance=camera_cfg.get("covariance"),
+            bias=camera_cfg.get("bias"),
             rng=rng,
         )
         targets["visual_camera"] = np.asarray(

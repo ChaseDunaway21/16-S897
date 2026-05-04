@@ -56,6 +56,8 @@ def main() -> None:
     print(f"Log file: {result['log_file']}")
     if result.get("sensor_history_file") is not None:
         print(f"Sensor data: {result['sensor_history_file']}")
+    if result.get("estimator_history_file") is not None:
+        print(f"Estimator data: {result['estimator_history_file']}")
     print("Final spacecraft state (SI units):")
     print(f"  position [m]: {sim.spacecraft.position_eci}")
     print(f"  velocity [m/s]: {sim.spacecraft.velocity_eci}")

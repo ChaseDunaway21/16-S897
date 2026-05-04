@@ -28,8 +28,6 @@ def covariance_matrix(covariance: np.ndarray | None, size: int = 3) -> np.ndarra
     cov = np.asarray(covariance, dtype=float)
     if cov.ndim == 0:
         return float(cov) * np.eye(size)
-    if cov.shape != (size, size):
-        raise ValueError(f"covariance must be scalar or {size}x{size}")
     return cov
 
 

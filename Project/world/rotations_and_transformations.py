@@ -133,7 +133,9 @@ def normalize_quaternion(q: np.ndarray) -> np.ndarray:
     return q / np.linalg.norm(q)
 
 
-def quaternion_from_rotation_vector(rotation_vector: np.ndarray) -> np.ndarray:
+def quaternion_from_rotation_vector(
+    rotation_vector: np.ndarray,
+) -> np.ndarray:  # TODO this simplifies the expm, I may swap it out
     """Convert a rotation vector into a unit quaternion using axis-angle [3]."""
     rotation_vector = np.asarray(rotation_vector, dtype=float).reshape(3)
     angle = np.linalg.norm(rotation_vector)

@@ -17,7 +17,12 @@ from .common import (
     set_equal_orbit_axes,
     style_time_axis,
 )
-from world.rotations_and_transformations import R_body_to_inertial, quaternion_to_euler
+from world.rotations_and_transformations import (
+    L,
+    R_body_to_inertial,
+    normalize_quaternion,
+    quaternion_to_euler,
+)
 from world.models.constants import EARTH_RADIUS_KM
 
 
@@ -36,6 +41,7 @@ class SimulationPlotContext(Protocol):
     show_sun_safe_mode_axis_plot: bool
     show_sensor_plot: bool
     show_camera_measurement_plot: bool
+    show_estimator_plot: bool
     sensor_targets: Mapping[str, np.ndarray]
     spacecraft: Any
     output_dir: Path | None
@@ -126,6 +132,7 @@ def simulation_plot_paths(
             "sun_safe_mode_axis": root_dir / "simulation_sun_safe_mode_axis.png",
             "sensors": root_dir / "simulation_sensors.png",
             "camera_measurements": root_dir / "simulation_camera_measurements.png",
+            "estimator": root_dir / "simulation_estimator.png",
         }
 
     base_path = Path(save_path)
@@ -142,12 +149,16 @@ def simulation_plot_paths(
                 "camera_measurements": base_path.with_name(
                     f"{base_path.stem}_camera_measurements{base_path.suffix}"
                 ),
+                "estimator": base_path.with_name(
+                    f"{base_path.stem}_estimator{base_path.suffix}"
+                ),
             }
         return {
             "overview": base_path,
             "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
             "sensors": base_path / "simulation_sensors.png",
             "camera_measurements": base_path / "simulation_camera_measurements.png",
+            "estimator": base_path / "simulation_estimator.png",
         }
 
     if base_path.suffix:
@@ -163,6 +174,7 @@ def simulation_plot_paths(
             "sun_safe_mode_axis": root_dir / f"{prefix}_sun_safe_mode_axis.png",
             "sensors": root_dir / f"{prefix}_sensors.png",
             "camera_measurements": root_dir / f"{prefix}_camera_measurements.png",
+            "estimator": root_dir / f"{prefix}_estimator.png",
         }
 
     return {
@@ -174,6 +186,7 @@ def simulation_plot_paths(
         "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
         "sensors": base_path / "simulation_sensors.png",
         "camera_measurements": base_path / "simulation_camera_measurements.png",
+        "estimator": base_path / "simulation_estimator.png",
     }
 
 
@@ -259,24 +272,26 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     return fig
 
 
-def camera_measurement_state_indices(
+def camera_measurement_samples(
     times: np.ndarray,
     sensor_history: Mapping[str, Mapping[str, object]],
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     camera_data = sensor_history.get("visual_camera")
     if camera_data is None:
-        return np.empty(0, dtype=int)
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
 
     camera_times = np.asarray(camera_data["times_s"], dtype=float)
     camera_measurements = np.asarray(camera_data["measurements"], dtype=float)
     if camera_times.size == 0 or camera_measurements.size == 0:
-        return np.empty(0, dtype=int)
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
     if camera_measurements.ndim == 1:
-        camera_measurements = camera_measurements[:, np.newaxis]
+        camera_measurements = camera_measurements.reshape(1, -1)
 
-    valid_times = camera_times[np.isfinite(camera_measurements).all(axis=1)]
+    valid = np.isfinite(camera_measurements).all(axis=1)
+    valid_times = camera_times[valid]
+    valid_measurements = camera_measurements[valid]
     if valid_times.size == 0:
-        return np.empty(0, dtype=int)
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
 
     indices = np.searchsorted(times, valid_times)
     indices = np.clip(indices, 0, times.size - 1)
@@ -285,26 +300,47 @@ def camera_measurement_state_indices(
         times[indices] - valid_times
     )
     indices[use_previous] = previous_indices[use_previous]
-    return np.unique(indices)
+    return indices, valid_measurements
 
 
 def plot_camera_measurement_figure(
     times: np.ndarray,
     pos_km: np.ndarray,
+    attitudes: np.ndarray,
     sensor_history: Mapping[str, Mapping[str, object]],
     target_position_eci_km: np.ndarray,
 ) -> plt.Figure | None:
-    measurement_indices = camera_measurement_state_indices(times, sensor_history)
+    measurement_indices, measured_bearings_body = camera_measurement_samples(
+        times, sensor_history
+    )
     if measurement_indices.size == 0:
         return None
 
     max_vectors = 150
     if measurement_indices.size > max_vectors:
-        measurement_indices = measurement_indices[
-            np.linspace(0, measurement_indices.size - 1, max_vectors, dtype=int)
-        ]
+        selected = np.linspace(0, measurement_indices.size - 1, max_vectors, dtype=int)
+        measurement_indices = measurement_indices[selected]
+        measured_bearings_body = measured_bearings_body[selected]
 
     camera_positions = pos_km[measurement_indices]
+    camera_attitudes = np.asarray(attitudes, dtype=float)[measurement_indices]
+
+    bearing_norms = np.linalg.norm(measured_bearings_body, axis=1, keepdims=True)
+    bearing_norms[bearing_norms == 0.0] = 1.0
+    measured_bearings_body = measured_bearings_body / bearing_norms
+    measured_directions_eci = np.asarray(
+        [
+            R_body_to_inertial(q) @ bearing_body
+            for q, bearing_body in zip(camera_attitudes, measured_bearings_body)
+        ],
+        dtype=float,
+    )
+    measured_direction_norms = np.linalg.norm(
+        measured_directions_eci, axis=1, keepdims=True
+    )
+    measured_direction_norms[measured_direction_norms == 0.0] = 1.0
+    measured_directions_eci /= measured_direction_norms
+
     target_km = np.asarray(target_position_eci_km, dtype=float)
     directions = target_km - camera_positions
     direction_norms = np.linalg.norm(directions, axis=1, keepdims=True)
@@ -345,10 +381,24 @@ def plot_camera_measurement_figure(
         unit_directions[:, 2],
         length=vector_length,
         normalize=False,
+        color="#6b7280",
+        linewidth=0.7,
+        alpha=0.35,
+        label="ideal target bearing",
+    )
+    ax.quiver(
+        camera_positions[:, 0],
+        camera_positions[:, 1],
+        camera_positions[:, 2],
+        measured_directions_eci[:, 0],
+        measured_directions_eci[:, 1],
+        measured_directions_eci[:, 2],
+        length=vector_length,
+        normalize=False,
         color="#dc2626",
         linewidth=0.9,
         alpha=0.85,
-        label="bearing to target",
+        label="measured bearing",
     )
     ax.scatter(
         target_km[0],
@@ -361,7 +411,7 @@ def plot_camera_measurement_figure(
         label="target",
         zorder=5,
     )
-    ax.set_title("Camera Measurements Toward Target (ECI)")
+    ax.set_title("Camera Bearing Measurements (ECI)")
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
     ax.set_zlabel("z [km]")
@@ -628,6 +678,218 @@ def plot_sensor_measurements(
     return fig
 
 
+def nearest_time_indices(
+    reference_times: np.ndarray, query_times: np.ndarray
+) -> np.ndarray:
+    """Return nearest reference index for each query time."""
+    reference_times = np.asarray(reference_times, dtype=float)
+    query_times = np.asarray(query_times, dtype=float)
+    indices = np.searchsorted(reference_times, query_times)
+    indices = np.clip(indices, 0, reference_times.size - 1)
+    previous_indices = np.maximum(indices - 1, 0)
+    use_previous = np.abs(reference_times[previous_indices] - query_times) < np.abs(
+        reference_times[indices] - query_times
+    )
+    indices[use_previous] = previous_indices[use_previous]
+    return indices
+
+
+def quaternion_conjugate(q: np.ndarray) -> np.ndarray:
+    """Return the conjugate of one [w, x, y, z] quaternion."""
+    q = normalize_quaternion(q)
+    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=float)
+
+
+def attitude_error_vectors(
+    true_attitudes: np.ndarray, estimated_attitudes: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return sign-aligned estimated quaternions and MEKF attitude-error vectors."""
+    true_q = np.asarray([normalize_quaternion(q) for q in true_attitudes], dtype=float)
+    est_q = np.asarray(
+        [normalize_quaternion(q) for q in estimated_attitudes], dtype=float
+    )
+
+    signs = np.sign(np.sum(true_q * est_q, axis=1, keepdims=True))
+    signs[signs == 0.0] = 1.0
+    est_q = est_q * signs
+
+    errors = []
+    for q_true, q_est in zip(true_q, est_q):
+        q_error = normalize_quaternion(L(quaternion_conjugate(q_true)) @ q_est)
+        if q_error[0] < 0.0:
+            q_error = -q_error
+        errors.append(q_error[1:4])
+
+    return est_q, np.asarray(errors, dtype=float)
+
+
+def configured_gyro_bias(ctx: SimulationPlotContext) -> np.ndarray | None:
+    """Return configured gyroscope bias when the simulator exposes it."""
+    sensor_models = getattr(ctx, "sensor_models", {})
+    gyroscope = (
+        sensor_models.get("gyroscope") if isinstance(sensor_models, dict) else None
+    )
+    if gyroscope is None or not hasattr(gyroscope, "bias"):
+        return None
+    bias_random_walk_sigma = getattr(gyroscope, "bias_random_walk_sigma", np.zeros(3))
+    if np.any(bias_random_walk_sigma):
+        return None
+    return np.asarray(gyroscope.bias, dtype=float).reshape(3)
+
+
+def plot_estimator_figure(
+    ctx: SimulationPlotContext,
+    truth_times: np.ndarray,
+    true_attitudes: np.ndarray,
+    estimator_history: Mapping[str, object],
+) -> plt.Figure | None:
+    """Plot MEKF attitude estimate, attitude error, and 3-sigma bounds."""
+    if not estimator_history:
+        return None
+
+    est_times = np.asarray(estimator_history.get("times_s", []), dtype=float)
+    est_states = np.asarray(estimator_history.get("state_estimates", []), dtype=float)
+    sigmas = np.asarray(estimator_history.get("error_sigmas", []), dtype=float)
+    if est_times.size == 0 or est_states.size == 0 or sigmas.size == 0:
+        return None
+    if est_states.ndim != 2 or est_states.shape[1] < 7:
+        return None
+    if sigmas.ndim != 2 or sigmas.shape[1] < 6:
+        return None
+
+    truth_indices = nearest_time_indices(truth_times, est_times)
+    true_q = np.asarray(true_attitudes, dtype=float)[truth_indices]
+    est_q, attitude_error = attitude_error_vectors(true_q, est_states[:, 0:4])
+    attitude_bounds = 3.0 * sigmas[:, 0:3]
+    bias_estimates = est_states[:, 4:7]
+    bias_bounds = 3.0 * sigmas[:, 3:6]
+    bias_truth = configured_gyro_bias(ctx)
+
+    fig, axes = plt.subplots(
+        3, 1, figsize=(13, 11), facecolor=FIGURE_FACE_COLOR, sharex=True
+    )
+    fig.suptitle("MEKF Estimate and 3-Sigma Bounds", fontsize=15, fontweight="bold")
+
+    q_colors = ["#6d28d9", "#db2777", "#0ea5e9", "#16a34a"]
+    q_labels = ["q0", "q1", "q2", "q3"]
+    style_time_axis(axes[0])
+    for i, label in enumerate(q_labels):
+        axes[0].plot(
+            est_times,
+            true_q[:, i],
+            color=q_colors[i],
+            linewidth=1.5,
+            linestyle="--",
+            alpha=0.8,
+            label=f"true {label}",
+        )
+        axes[0].plot(
+            est_times,
+            est_q[:, i],
+            color=q_colors[i],
+            linewidth=1.4,
+            label=f"est {label}",
+        )
+    axes[0].set_title("Attitude Quaternion Mean vs Truth")
+    axes[0].set_ylabel("quaternion [-]")
+    axes[0].legend(loc="upper right", ncol=4, fontsize=8)
+
+    component_colors = ["#2563eb", "#f97316", "#059669"]
+    bound_colors = ["#1d4ed8", "#c2410c", "#047857"]
+    component_labels = ["x", "y", "z"]
+    style_time_axis(axes[1])
+    for i, label in enumerate(component_labels):
+        color = component_colors[i]
+        bound_color = bound_colors[i]
+        axes[1].fill_between(
+            est_times,
+            -attitude_bounds[:, i],
+            attitude_bounds[:, i],
+            color=bound_color,
+            alpha=0.10,
+            linewidth=0.0,
+            label=f"±3sigma {label}",
+        )
+        axes[1].plot(
+            est_times,
+            attitude_error[:, i],
+            color=color,
+            linewidth=1.4,
+            label=f"error {label}",
+        )
+        axes[1].plot(
+            est_times,
+            attitude_bounds[:, i],
+            color=bound_color,
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.45,
+        )
+        axes[1].plot(
+            est_times,
+            -attitude_bounds[:, i],
+            color=bound_color,
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.45,
+        )
+    axes[1].set_title("MEKF Quaternion-Vector Error with 3-Sigma Bounds")
+    axes[1].set_ylabel("quaternion-vector error [-]")
+    axes[1].legend(loc="upper right", ncol=3, fontsize=8)
+
+    style_time_axis(axes[2])
+    for i, label in enumerate(component_labels):
+        color = component_colors[i]
+        bound_color = bound_colors[i]
+        axes[2].fill_between(
+            est_times,
+            -bias_bounds[:, i],
+            bias_bounds[:, i],
+            color=bound_color,
+            alpha=0.10,
+            linewidth=0.0,
+            label=f"±3sigma {label}",
+        )
+        axes[2].plot(
+            est_times,
+            bias_estimates[:, i],
+            color=color,
+            linewidth=1.4,
+            label=f"bias {label}",
+        )
+        axes[2].plot(
+            est_times,
+            bias_bounds[:, i],
+            color=bound_color,
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.45,
+        )
+        axes[2].plot(
+            est_times,
+            -bias_bounds[:, i],
+            color=bound_color,
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.45,
+        )
+        if bias_truth is not None:
+            axes[2].axhline(
+                bias_truth[i],
+                color=color,
+                linewidth=1.0,
+                linestyle=":",
+                alpha=0.85,
+            )
+    axes[2].set_title("Gyroscope Bias Estimate with 3-Sigma Bounds")
+    axes[2].set_xlabel("time [s]")
+    axes[2].set_ylabel("bias [rad/s]")
+    axes[2].legend(loc="upper right", ncol=3, fontsize=8)
+
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.965))
+    return fig
+
+
 def plot_simulation_overview(
     ctx: SimulationPlotContext,
     times: np.ndarray,
@@ -873,9 +1135,17 @@ def plot_simulation(
         camera_measurement_fig = plot_camera_measurement_figure(
             times,
             pos_km,
+            att,
             sensor_history,
             target_position_eci_km,
         )
+
+    estimator_fig = None
+    estimator_history = result.get("estimator_history", {})
+    if getattr(ctx, "show_estimator_plot", True) and isinstance(
+        estimator_history, Mapping
+    ):
+        estimator_fig = plot_estimator_figure(ctx, times, att, estimator_history)
 
     if ctx.plot_layout == "together":
         fig = None
@@ -907,6 +1177,13 @@ def plot_simulation(
                 plot_paths["camera_measurements"],
                 "Camera measurement plot saved",
             )
+        if estimator_fig is not None:
+            save_figure(
+                ctx.logger,
+                estimator_fig,
+                plot_paths["estimator"],
+                "Estimator plot saved",
+            )
 
         if show:
             plt.show()
@@ -914,7 +1191,13 @@ def plot_simulation(
         return (
             fig
             if fig is not None
-            else (sun_safe_mode_axis_fig or sensor_fig or camera_measurement_fig or {})
+            else (
+                sun_safe_mode_axis_fig
+                or sensor_fig
+                or camera_measurement_fig
+                or estimator_fig
+                or {}
+            )
         )
 
     figures = {}
@@ -968,6 +1251,8 @@ def plot_simulation(
         figures["sensors"] = sensor_fig
     if camera_measurement_fig is not None:
         figures["camera_measurements"] = camera_measurement_fig
+    if estimator_fig is not None:
+        figures["estimator"] = estimator_fig
     if ctx.show_gyrostat_components:
         figures["rho"] = (
             plot_component_overlay(
@@ -1042,6 +1327,13 @@ def plot_simulation(
             figures["camera_measurements"],
             plot_paths["camera_measurements"],
             "Camera measurement plot saved",
+        )
+    if "estimator" in figures:
+        save_figure(
+            ctx.logger,
+            figures["estimator"],
+            plot_paths["estimator"],
+            "Estimator plot saved",
         )
 
     if show:
