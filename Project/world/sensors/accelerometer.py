@@ -1,4 +1,5 @@
 """BMX160-style accelerometer model.
+This is entirely unused by ARGUS
 
 This sensor model is heavily inspired by GNC-Simulation:
 https://github.com/cmu-argus-2/GNC-Simulation.
@@ -17,8 +18,14 @@ from world.math import add_noise, covariance_matrix
 from world.rotations_and_transformations import inertial_to_body
 
 
+ACCELEROMETER_MODEL = np.eye(3)
+
+
 class Accelerometer:
-    """Return specific force in the body frame."""
+    """
+    Return specific force in the body frame.
+    For now the "model" is just identity.
+    """
 
     def __init__(
         self,
@@ -28,7 +35,9 @@ class Accelerometer:
     ) -> None:
         self.covariance = covariance_matrix(covariance)
         self.bias = (
-            np.zeros(3, dtype=float) if bias is None else np.asarray(bias, dtype=float)
+            np.zeros(3, dtype=float)
+            if bias is None
+            else np.asarray(bias, dtype=float).reshape(3)
         )
         self.rng = rng or np.random.default_rng()
 
@@ -46,7 +55,8 @@ class Accelerometer:
             specific_force_eci = np.asarray(
                 acceleration_eci, dtype=float
             ) - gravity.acceleration(position)  # [1]
-        return inertial_to_body(q, specific_force_eci) + self.bias
+        ideal_measurement = inertial_to_body(q, specific_force_eci)
+        return ACCELEROMETER_MODEL @ ideal_measurement + self.bias
 
     def get_measurement(
         self,
