@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math import add_noise, covariance_matrix, unit
+from world.math import add_noise, covariance_matrix, unit_vector
 from world.models.sun import SunModel
 from world.rotations_and_transformations import inertial_to_body
 
@@ -45,7 +45,7 @@ class SunSensor:
 
         q = state[state_index["ATTITUDE"]]
         sun_eci = self.sun_model.direction_eci(position, time_s)  # [2]
-        return unit(inertial_to_body(q, sun_eci))
+        return unit_vector(inertial_to_body(q, sun_eci))
 
     def get_measurement(
         self, state: np.ndarray, state_index: dict, time_s: float = 0.0
@@ -53,4 +53,4 @@ class SunSensor:
         clean = self.clean_measurement(state, state_index, time_s)
         if clean is None:
             return None
-        return unit(add_noise(clean, self.covariance, self.rng))
+        return unit_vector(add_noise(clean, self.covariance, self.rng))

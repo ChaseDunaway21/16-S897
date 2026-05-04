@@ -12,8 +12,10 @@ def unit_vector(v: np.ndarray) -> np.ndarray:
     return vector / np.linalg.norm(vector)
 
 
-def unit(v: np.ndarray) -> np.ndarray:
-    return unit_vector(v)
+def unit_rows(vectors: np.ndarray) -> np.ndarray:
+    """Return a copy of vectors with each row normalized."""
+    array = np.asarray(vectors, dtype=float)
+    return array / np.linalg.norm(array, axis=1, keepdims=True)
 
 
 def scalar_value(value: float) -> float:
@@ -44,3 +46,15 @@ def add_noise(
 def skew_symmetric(v: np.ndarray) -> np.ndarray:
     """Skew-symmetric matrix for cross product."""
     return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+
+
+def unskew(S: np.ndarray) -> np.ndarray:
+    """Return the vector of a skew-symmetric matrix."""
+    S = np.asarray(S, dtype=float).reshape(3, 3)
+    return 0.5 * np.array(
+        [
+            S[2, 1] - S[1, 2],
+            S[0, 2] - S[2, 0],
+            S[1, 0] - S[0, 1],
+        ]
+    )

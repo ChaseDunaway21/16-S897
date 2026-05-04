@@ -6,6 +6,10 @@ References:
 [2] J. Sanz Subirana, J.M. Juan Zornoza, and M. Hernandez-Pajares,
     "Transformations between ECEF and ENU coordinates," ESA Navipedia, 2011.
     https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates
+[3] "Conversion between quaternions and Euler angles," Wikipedia.
+    https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+[4] "Rotation matrix: Quaternion," Wikipedia.
+    https://en.wikipedia.org/wiki/Rotation_matrix#Quaternion
 """
 
 from __future__ import annotations
@@ -16,6 +20,17 @@ import spiceypy as spice
 
 from world.math import skew_symmetric
 from world.models.constants import RADIUS_EARTH, WGS84_FLATTENING
+
+# These are helper matrices directly from the Notes
+# H = [0; I]
+# T = [1, 0; 0, -I]
+H = np.vstack((np.zeros((1, 3)), np.eye(3)))
+T = np.block(
+    [
+        [np.ones((1, 1)), np.zeros((1, 3))],
+        [np.zeros((3, 1)), -np.eye(3)],
+    ]
+)
 
 
 def R_z(angle: float) -> np.ndarray:
@@ -96,7 +111,8 @@ def L(q: np.ndarray) -> np.ndarray:
 
 
 def R(q: np.ndarray) -> np.ndarray:
-    """Return R(q) matrix for quaternion multiplication.
+    """
+    Return R(q) matrix for quaternion multiplication.
     This is directly from the notes.
     """
     s = q[0]
@@ -111,13 +127,85 @@ def R(q: np.ndarray) -> np.ndarray:
     )
 
 
+def normalize_quaternion(q: np.ndarray) -> np.ndarray:
+    """Return a unit quaternion in [w, x, y, z] order."""
+    q = np.asarray(q, dtype=float).reshape(4)
+    return q / np.linalg.norm(q)
+
+
+def quaternion_from_rotation_vector(rotation_vector: np.ndarray) -> np.ndarray:
+    """Convert a rotation vector into a unit quaternion using axis-angle [3]."""
+    rotation_vector = np.asarray(rotation_vector, dtype=float).reshape(3)
+    angle = np.linalg.norm(rotation_vector)
+    if angle < 1e-12:
+        return normalize_quaternion(np.hstack([1.0, 0.5 * rotation_vector]))
+
+    axis = rotation_vector / angle
+    half_angle = 0.5 * angle
+    return np.hstack([np.cos(half_angle), np.sin(half_angle) * axis])
+
+
+def quaternion_from_rotation_matrix(rotation_matrix: np.ndarray) -> np.ndarray:
+    """
+    Convert a rotation matrix into a [w, x, y, z] unit quaternion [4].
+    In the notes, you could technically take this route
+    log(Q) -> theta
+    expm(theta) -> q
+    But this is direct and much faster to simulate.
+    """
+    Q = np.asarray(rotation_matrix, dtype=float).reshape(3, 3)
+    Qxx, Qxy, Qxz = Q[0]
+    Qyx, Qyy, Qyz = Q[1]
+    Qzx, Qzy, Qzz = Q[2]
+
+    trace = Qxx + Qyy + Qzz
+
+    if trace >= 0.0:
+        r = np.sqrt(1.0 + trace)
+        s = 0.5 / r
+        q = [
+            0.5 * r,
+            (Qzy - Qyz) * s,
+            (Qxz - Qzx) * s,
+            (Qyx - Qxy) * s,
+        ]
+    elif Qxx > Qyy and Qxx > Qzz:
+        r = np.sqrt(1.0 + Qxx - Qyy - Qzz)
+        s = 0.5 / r
+        q = [
+            (Qzy - Qyz) * s,
+            0.5 * r,
+            (Qxy + Qyx) * s,
+            (Qzx + Qxz) * s,
+        ]
+    elif Qyy > Qzz:
+        r = np.sqrt(1.0 - Qxx + Qyy - Qzz)
+        s = 0.5 / r
+        q = [
+            (Qxz - Qzx) * s,
+            (Qxy + Qyx) * s,
+            0.5 * r,
+            (Qyz + Qzy) * s,
+        ]
+    else:
+        r = np.sqrt(1.0 - Qxx - Qyy + Qzz)
+        s = 0.5 / r
+        q = [
+            (Qyx - Qxy) * s,
+            (Qzx + Qxz) * s,
+            (Qyz + Qzy) * s,
+            0.5 * r,
+        ]
+
+    return normalize_quaternion(np.asarray(q, dtype=float))
+
+
 def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
     """Convert a quaternion to a rotation matrix.
     This is directly from the notes.
     """
     q = np.asarray(q, dtype=float)
     q = q / np.linalg.norm(q)
-    H = np.vstack((np.zeros((1, 3)), np.eye(3)))
     return H.T @ R(q).T @ L(q) @ H
 
 
@@ -155,8 +243,8 @@ def quaternion_from_two_vectors(source: np.ndarray, target: np.ndarray) -> np.nd
 
 
 def quaternion_to_euler(q: np.ndarray) -> np.ndarray:
-    """Convert a quaternion to roll, pitch, yaw."""
-    w, x, y, z = q
+    """Convert a quaternion to roll, pitch, yaw using the ZYX formula [3]."""
+    w, x, y, z = normalize_quaternion(q)
     roll = np.arctan2(2 * (w * x + y * z), 1 - 2 * (x**2 + y**2))
     s = 2 * (w * y - z * x)
     s = np.clip(s, -1, 1)

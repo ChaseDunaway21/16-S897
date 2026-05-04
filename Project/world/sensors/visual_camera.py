@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math import add_noise, covariance_matrix, unit
+from world.math import add_noise, covariance_matrix, unit_vector
 from world.rotations_and_transformations import inertial_to_body
 
 
@@ -27,7 +27,7 @@ class VisualCamera:
         covariance: np.ndarray | None = None,
         rng: np.random.Generator | None = None,
     ) -> None:
-        self.boresight_body = unit(boresight_body)
+        self.boresight_body = unit_vector(boresight_body)
         self.field_of_view_rad = float(field_of_view_rad)
         self.covariance = covariance_matrix(covariance)
         self.rng = rng or np.random.default_rng()
@@ -40,8 +40,8 @@ class VisualCamera:
     ) -> np.ndarray | None:
         position = state[state_index["POS_ECI"]]
         q = state[state_index["ATTITUDE"]]
-        bearing_eci = unit(np.asarray(target_position_eci, dtype=float) - position)
-        bearing_body = unit(inertial_to_body(q, bearing_eci))
+        bearing_eci = unit_vector(np.asarray(target_position_eci, dtype=float) - position)
+        bearing_body = unit_vector(inertial_to_body(q, bearing_eci))
 
         if bearing_body @ self.boresight_body < np.cos(0.5 * self.field_of_view_rad):
             return None
@@ -58,4 +58,4 @@ class VisualCamera:
         clean = self.clean_measurement(state, state_index, target_position_eci)
         if clean is None:
             return None
-        return unit(add_noise(clean, self.covariance, self.rng))
+        return unit_vector(add_noise(clean, self.covariance, self.rng))
