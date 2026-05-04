@@ -757,9 +757,23 @@ def plot_estimator_figure(
     if sigmas.ndim != 2 or sigmas.shape[1] < 6:
         return None
 
+    truth_times = np.asarray(truth_times, dtype=float)
+    truth_q = np.asarray(true_attitudes, dtype=float)
+    if truth_times.size == 0 or truth_q.size == 0:
+        return None
+    if truth_q.ndim != 2 or truth_q.shape[1] < 4:
+        return None
+    if truth_times.shape[0] != truth_q.shape[0]:
+        return None
+
+    truth_q = np.asarray(
+        [normalize_quaternion(q) for q in truth_q[:, 0:4]], dtype=float
+    )
     truth_indices = nearest_time_indices(truth_times, est_times)
-    true_q = np.asarray(true_attitudes, dtype=float)[truth_indices]
-    est_q, attitude_error = attitude_error_vectors(true_q, est_states[:, 0:4])
+    true_q_at_estimator_times = truth_q[truth_indices]
+    est_q, attitude_error = attitude_error_vectors(
+        true_q_at_estimator_times, est_states[:, 0:4]
+    )
     attitude_bounds = 3.0 * sigmas[:, 0:3]
     bias_estimates = est_states[:, 4:7]
     bias_bounds = 3.0 * sigmas[:, 3:6]
@@ -775,8 +789,8 @@ def plot_estimator_figure(
     style_time_axis(axes[0])
     for i, label in enumerate(q_labels):
         axes[0].plot(
-            est_times,
-            true_q[:, i],
+            truth_times,
+            truth_q[:, i],
             color=q_colors[i],
             linewidth=1.5,
             linestyle="--",

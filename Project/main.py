@@ -54,6 +54,8 @@ def main() -> None:
     print(f"Duration: {result['sim_duration_s']:.2f} s")
     print(f"Steps: {result['num_steps']}")
     print(f"Log file: {result['log_file']}")
+    if result.get("state_history_file") is not None:
+        print(f"State data: {result['state_history_file']}")
     if result.get("sensor_history_file") is not None:
         print(f"Sensor data: {result['sensor_history_file']}")
     if result.get("estimator_history_file") is not None:

@@ -44,12 +44,7 @@ def _run_single_monte_carlo_trial(
     run_dir = Path(output_dir)
     sim = Simulator(config_path=Path(config_path), output_dir=run_dir)
     result = sim.run(show_progress=False)
-    state_file = run_dir / "state_history.npz"
-    np.savez_compressed(
-        state_file,
-        times_s=np.asarray(result["times_s"], dtype=float),
-        state_history_si=np.asarray(result["state_history_si"], dtype=float),
-    )
+    state_file = result.get("state_history_file") or str(run_dir / "state_history.npz")
     if save_plots:
         sim.plot_simulation(result, show=False)
         if sim.show_momentum_sphere_plot:
@@ -388,6 +383,21 @@ class Simulator:
 
         enabled = ", ".join(self.sensor_models) if self.sensor_models else "none"
         self.logger.info("Enabled sensors: %s", enabled)
+
+    def _save_state_history(
+        self, times: np.ndarray, history: np.ndarray
+    ) -> Path | None:
+        if times.size == 0 or history.size == 0:
+            return None
+
+        state_file = self.output_dir / "state_history.npz"
+        np.savez_compressed(
+            state_file,
+            times_s=np.asarray(times, dtype=float),
+            state_history_si=np.asarray(history, dtype=float),
+        )
+        self.logger.info("State history saved: %s", state_file)
+        return state_file
 
     def _setup_estimator(self) -> None:
         estimator_cfg = self.cfg.get("estimator_properties", {}) or {}
@@ -881,6 +891,7 @@ class Simulator:
             time_s=t,
         )
         self.logger.info("Log file saved: %s", self.log_file)
+        state_history_file = self._save_state_history(times, history)
         sensor_history = self._sensor_history_arrays()
         sensor_history_file = self._save_sensor_history(sensor_history)
         estimator_history = self._estimator_history_arrays()
@@ -894,6 +905,9 @@ class Simulator:
             "num_steps": num_steps,
             "log_file": str(self.log_file),
             "dynamic_balance_rho": rho,
+            "state_history_file": (
+                None if state_history_file is None else str(state_history_file)
+            ),
             "sensor_measurements": sensor_history,
             "sensor_history_file": (
                 None if sensor_history_file is None else str(sensor_history_file)

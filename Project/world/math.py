@@ -23,8 +23,6 @@ def scalar_value(value: float) -> float:
 
 
 def covariance_matrix(covariance: np.ndarray | None, size: int = 3) -> np.ndarray:
-    if covariance is None:
-        return np.zeros((size, size), dtype=float)
     cov = np.asarray(covariance, dtype=float)
     if cov.ndim == 0:
         return float(cov) * np.eye(size)
@@ -34,8 +32,6 @@ def covariance_matrix(covariance: np.ndarray | None, size: int = 3) -> np.ndarra
 def add_noise(
     value: np.ndarray, covariance: np.ndarray, rng: np.random.Generator
 ) -> np.ndarray:
-    if not np.any(covariance):
-        return np.asarray(value, dtype=float)
     return np.asarray(value, dtype=float) + rng.multivariate_normal(
         np.zeros(covariance.shape[0]), covariance
     )
