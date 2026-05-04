@@ -12,12 +12,13 @@ from pathlib import Path
 import numpy as np
 import cyipopt as ipopt
 
-from .wahbas_plotting import plot_wahba_monte_carlo
+from .wahbas_plotting import plot_wahba_attitude_trials, plot_wahba_monte_carlo
 from .wahbas_sensor_gen import (
     generate_wahba_monte_carlo_samples,
     generate_wahba_sensor_sample,
 )
 from world.rotations_and_transformations import R_inertial_to_body
+from world.math import unit_vector
 
 #################################################################################################
 # WAHBA SVD
@@ -48,6 +49,9 @@ def wahba_svd(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
     #        V.T and U have to be orthogonal, so the best solution is to make Q = I
     #    Thus,
     #    Q = U V.T
+
+    unit_body_vectors = unit_vector(body_vectors)
+    unit_reference_vectors = unit_vector(reference_vectors)
 
     B = body_vectors.T @ reference_vectors
     U, _, Vt = np.linalg.svd(B)
@@ -146,7 +150,7 @@ def wahba_value(
     R_est: np.ndarray, body_vectors: np.ndarray, reference_vectors: np.ndarray
 ) -> float:
     B = body_vectors.T @ reference_vectors
-    return float(np.trace(R_est @ B))
+    return float(np.trace(R_est.T @ B))
 
 
 def rotation_error_deg(R_est: np.ndarray, R_true: np.ndarray) -> float:
@@ -165,11 +169,18 @@ def solve_wahba_sample(sample: dict[str, object]) -> dict[str, object]:
         "sensor_names": sample["sensor_names"],
         "body_vectors": body_vectors,
         "reference_vectors_eci": reference_vectors,
+        "R_true": R_true,
+        "R_svd": R_svd,
+        "R_sdp": R_sdp,
         "svd_attitude_error_deg": rotation_error_deg(R_svd, R_true),
         "sdp_attitude_error_deg": rotation_error_deg(R_sdp, R_true),
         "svd_value": wahba_value(R_svd, body_vectors, reference_vectors),
         "sdp_value": wahba_value(R_sdp, body_vectors, reference_vectors),
     }
+
+
+def attitude_plot_path(save_path: Path) -> Path:
+    return save_path.with_name(f"{save_path.stem}_attitudes{save_path.suffix}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -238,7 +249,10 @@ def main() -> None:
                 args.save,
                 args.show,
             )
+            attitudes_save = attitude_plot_path(args.save)
+            plot_wahba_attitude_trials(results, attitudes_save, args.show)
             print(f"Wahba Monte Carlo plot: {args.save}")
+            print(f"Wahba attitude trial plot: {attitudes_save}")
         return
 
     sample = generate_wahba_sensor_sample(
@@ -260,6 +274,10 @@ def main() -> None:
     print(f"SVD value: {result['svd_value']:.12g}")
     print(f"SDP value: {result['sdp_value']:.12g}")
     print(f"Value difference SDP-SVD: {result['sdp_value'] - result['svd_value']:.6e}")
+
+    if args.plot or args.show:
+        plot_wahba_attitude_trials([result], args.save, args.show)
+        print(f"Wahba attitude trial plot: {args.save}")
 
 
 if __name__ == "__main__":

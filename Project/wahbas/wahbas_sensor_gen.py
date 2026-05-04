@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from world.math import unit
+from world.math import unit_vector
 from world.models.sun import SunModel
 from world.sensors import Magnetometer, SunSensor, VisualCamera
 from world.spacecraft import Spacecraft
@@ -27,7 +27,7 @@ def random_quaternion(rng: np.random.Generator) -> np.ndarray:
     return q / np.linalg.norm(q)
 
 
-def enabled_wahba_sensors(
+def enabled_wahba_sensors( # Only the vector sensors can be used, so all but the gyro for ARGUS
     cfg: dict[str, Any], spacecraft: Spacecraft, rng: np.random.Generator
 ) -> tuple[dict[str, object], dict[str, np.ndarray]]:
     sensor_cfg = cfg.get("sensor_properties", {}) or {}
@@ -37,6 +37,7 @@ def enabled_wahba_sensors(
     if not isinstance(sensor_cfg, dict) or not config_bool(sensor_cfg.get("enabled")):
         return sensors, targets
 
+    # Is mag enabled
     magnetometer_cfg = sensor_cfg.get("magnetometer", {}) or {}
     if config_bool(magnetometer_cfg.get("enabled"), True):
         sensors["magnetometer"] = Magnetometer(
@@ -44,6 +45,7 @@ def enabled_wahba_sensors(
             rng=rng,
         )
 
+    # Is sun sensor enabled
     sun_sensor_cfg = sensor_cfg.get("sun_sensor", {}) or {}
     if config_bool(sun_sensor_cfg.get("enabled"), True):
         sensors["sun_sensor"] = SunSensor(
@@ -60,6 +62,7 @@ def enabled_wahba_sensors(
             ),
         )
 
+    # Is camera enabled
     camera_cfg = sensor_cfg.get("visual_camera", {}) or {}
     if config_bool(camera_cfg.get("enabled"), True):
         sensors["visual_camera"] = VisualCamera(
@@ -91,11 +94,11 @@ def reference_vector_eci(
 ) -> np.ndarray:
     position = state[idx["POS_ECI"]]
     if sensor_name == "magnetometer":
-        return unit(sensor.magnetic_field_model.field_eci(position, time_s))
+        return unit_vector(sensor.magnetic_field_model.field_eci(position, time_s))
     if sensor_name == "sun_sensor":
-        return unit(sensor.sun_model.direction_eci(position, time_s))
+        return unit_vector(sensor.sun_model.direction_eci(position, time_s))
     if sensor_name == "visual_camera":
-        return unit(targets["visual_camera"] - position)
+        return unit_vector(targets["visual_camera"] - position)
     raise ValueError(f"{sensor_name} is not configured as a Wahba bearing sensor")
 
 
@@ -151,7 +154,7 @@ def generate_wahba_sensor_sample(
             if measurement is None or not np.isfinite(measurement).all():
                 continue
             names.append(sensor_name)
-            body_vectors.append(unit(measurement))
+            body_vectors.append(unit_vector(measurement))
             reference_vectors.append(
                 reference_vector_eci(sensor_name, sensor, state, idx, targets, time_s)
             )
