@@ -1,3 +1,5 @@
 """Actuator models."""
 
-__all__: list[str] = []
+from .magnetorquer import Magnetorquer
+
+__all__ = ["Magnetorquer"]
