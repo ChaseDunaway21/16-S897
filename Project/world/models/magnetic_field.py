@@ -23,7 +23,7 @@ from world.models.constants import (
     GMST_J2000,
     J2000_UTC,
 )
-from world.math import scalar_value
+from Project.world.math_utils import scalar_value
 from world.rotations_and_transformations import R_z, enu_to_ecef, geodetic_from_ecef
 
 

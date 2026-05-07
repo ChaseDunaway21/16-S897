@@ -18,7 +18,7 @@ from .wahbas_sensor_gen import (
     generate_wahba_sensor_sample,
 )
 from world.rotations_and_transformations import R_inertial_to_body
-from world.math import unit_vector
+from Project.world.math_utils import unit_vector
 
 #################################################################################################
 # WAHBA SVD
@@ -53,7 +53,7 @@ def wahba_svd(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
     unit_body_vectors = unit_vector(body_vectors)
     unit_reference_vectors = unit_vector(reference_vectors)
 
-    B = body_vectors.T @ reference_vectors
+    B = unit_body_vectors.T @ unit_reference_vectors
     U, _, Vt = np.linalg.svd(B)
     M = np.diag([1.0, 1.0, np.linalg.det(U @ Vt)])
     return U @ M @ Vt

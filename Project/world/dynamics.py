@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math import skew_symmetric
+from Project.world.math_utils import skew_symmetric
 from world.rotations_and_transformations import attitude_jacobian as G
 import world.models.gravity as gravity
 import world.models.drag as drag
@@ -24,29 +24,40 @@ def f(
     dt: float,
     inertia_tensor: np.ndarray,
     environment_model: dict | None = None,
+    actuator_model: dict | None = None,
 ) -> np.ndarray:
     """Compute full state derivative from orbital and attitude dynamics."""
     _ = dt
 
-    state_dot = np.zeros_like(state)
-
-    orbital_dynamics(state, state_dot, state_index, current_time, environment_model)
-    attitude_dynamics(
-        state, state_dot, state_index, inertia_tensor, current_time, environment_model
+    return (
+        orbital_dynamics(state, state_index)
+        + attitude_dynamics(
+            state,
+            state_index,
+            inertia_tensor,
+            current_time,
+            environment_model,
+            actuator_model,
+        )
+        + environmental_dynamics(
+            state,
+            state_index,
+            current_time,
+            environment_model,
+        )
     )
-
-    return state_dot
 
 
 def attitude_dynamics(
     state: np.ndarray,
-    state_dot: np.ndarray,
     state_index: dict,
     inertia_tensor: np.ndarray,
     current_time: float,
     environment_model: dict | None = None,
+    actuator_model: dict | None = None,
 ) -> np.ndarray:
     """Compute quaternion and angular-velocity dynamics."""
+    state_dot = np.zeros_like(state)
 
     attitude_slice = state_index["ATTITUDE"]
     attitude_rate_slice = state_index["ATTITUDE_RATE"]
@@ -57,47 +68,70 @@ def attitude_dynamics(
 
     qdot = 0.5 * G(q) @ w  # Attitude Jacobian from Notes
 
-    # Using the numpy solver to speed up the simulation, but this is the same as the notes:
+    # Using the numpy solver to speed up the simulation, but this is the same as the notes
+    # (without external torques):
     # First, convert J into the principal components frame
     # Then solve each component of euler separately:
     # wdot_1 = -(J33 - J22)* w2 * w3 / J11
     # wdot_2 = -(J11 - J33)* w1 * w3 / J22
     # wdot_3 = -(J22 - J11)* w1 * w2 / J33
 
-    # This time add the gyrostat momentum (rhodot = 0)
+    # This time add the gyrostat momentum and body-frame torque terms.
     environmental_torque = environmental_torque_body(
         state, state_index, current_time, environment_model
     )
+    actuator_torque = actuator_torque_body(
+        state, state_index, current_time, actuator_model
+    )
     wdot = np.linalg.solve(
         inertia_tensor,
-        environmental_torque - skew_symmetric(w) @ (inertia_tensor @ w + rho),
-    )  # J wdot + w x (Jw + rho) = tau_env
+        environmental_torque
+        + actuator_torque
+        - skew_symmetric(w) @ (inertia_tensor @ w + rho),
+    )  # J wdot + w x (Jw + rho) = tau_env + tau_act
 
     state_dot[attitude_slice] = qdot
     state_dot[attitude_rate_slice] = wdot
+    state_dot[state_index["RHO"]] = actuator_rho_dot_body(
+        state, state_index, current_time, actuator_model
+    )
     return state_dot
 
 
 def orbital_dynamics(
     state: np.ndarray,
-    state_dot: np.ndarray,
     state_index: dict,
-    current_time: float,
-    environment_model: dict | None = None,
 ) -> np.ndarray:
-    """Compute translational orbital dynamics in the full state vector."""
+    """Return the position-kinematics and J2 perturbation to the full xdot."""
+    state_dot = np.zeros_like(state)
 
-    pos_slice = state_index["POS_ECI"]
-    vel_slice = state_index["VEL_ECI"]
-
-    state_dot[pos_slice] = state[vel_slice]
-    state_dot[vel_slice] = total_acceleration(
-        state, state_index, current_time, environment_model
+    state_dot[state_index["POS_ECI"]] = state[state_index["VEL_ECI"]]
+    state_dot[state_index["VEL_ECI"]] = gravity.j2_acceleration(
+        state[state_index["POS_ECI"]]
     )
 
     return state_dot
 
 
+def environmental_dynamics(
+    state: np.ndarray,
+    state_index: dict,
+    current_time: float,
+    environment_model: dict | None = None,
+) -> np.ndarray:
+    """Return non-gravitational translational acceleration contributions."""
+    state_dot = np.zeros_like(state)
+    acceleration_eci = environmental_acceleration(
+        state, state_index, current_time, environment_model
+    )
+
+    state_dot[state_index["VEL_ECI"]] += acceleration_eci
+
+    return state_dot
+
+
+# This is wired into the accelerometer, but that sensor is often entirely unused
+# I may just move this into environmental dynamics later
 def environmental_acceleration(
     state: np.ndarray,
     state_index: dict,
@@ -196,21 +230,35 @@ def environmental_torque_body(
     return torque_body
 
 
-def total_acceleration(
+def actuator_torque_body(
     state: np.ndarray,
     state_index: dict,
     current_time: float,
-    environment_model: dict | None = None,
+    actuator_model: dict | None = None,
 ) -> np.ndarray:
-    """Return gravity plus enabled environmental accelerations in ECI [m/s^2]."""
-    return gravity.j2_acceleration(
-        state[state_index["POS_ECI"]]
-    ) + environmental_acceleration(
-        state,
-        state_index,
-        current_time,
-        environment_model,
-    )
+    """Return actuator torque applied to the spacecraft body [N m]."""
+    _ = state, state_index, current_time
+    if not actuator_model:
+        return np.zeros(3, dtype=float)
+
+    torque_body = np.zeros(3, dtype=float)
+    reaction_wheel = actuator_model.get("reaction_wheel")
+    if reaction_wheel is not None:
+        torque_body += reaction_wheel.get_torque(
+            actuator_model.get("reaction_wheel_speeds", np.zeros(reaction_wheel.N_RWs))
+        )
+
+    return torque_body
+
+
+def actuator_rho_dot_body(
+    state: np.ndarray,
+    state_index: dict,
+    current_time: float,
+    actuator_model: dict | None = None,
+) -> np.ndarray:
+    """Return gyrostat-momentum derivative from internal actuators [N m]."""
+    return -actuator_torque_body(state, state_index, current_time, actuator_model)
 
 
 def rk4_step(
@@ -221,10 +269,17 @@ def rk4_step(
     state_index: dict,
     inertia_tensor: np.ndarray,
     environment_model: dict | None = None,
+    actuator_model: dict | None = None,
 ) -> np.ndarray:
     """Generic RK4 step for any state dimension and derivative function."""
     k1 = derivative_fn(
-        state, state_index, current_time, dt, inertia_tensor, environment_model
+        state,
+        state_index,
+        current_time,
+        dt,
+        inertia_tensor,
+        environment_model,
+        actuator_model,
     )
     k2 = derivative_fn(
         state + 0.5 * dt * k1,
@@ -233,6 +288,7 @@ def rk4_step(
         dt,
         inertia_tensor,
         environment_model,
+        actuator_model,
     )
     k3 = derivative_fn(
         state + 0.5 * dt * k2,
@@ -241,6 +297,7 @@ def rk4_step(
         dt,
         inertia_tensor,
         environment_model,
+        actuator_model,
     )
     k4 = derivative_fn(
         state + dt * k3,
@@ -249,6 +306,7 @@ def rk4_step(
         dt,
         inertia_tensor,
         environment_model,
+        actuator_model,
     )
 
     return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
@@ -261,6 +319,7 @@ def integrate_dynamics(
     method: str = "rk4",
     derivative_fn=None,
     environment_model: dict | None = None,
+    actuator_model: dict | None = None,
 ) -> np.ndarray:
     """Integrate spacecraft dynamics while using state/index/inertia from the spacecraft object."""
 
@@ -282,6 +341,7 @@ def integrate_dynamics(
             state_index,
             inertia_tensor,
             environment_model,
+            actuator_model,
         )
         quat_norm = np.linalg.norm(x_new[attitude_slice])
         if quat_norm > 0.0:

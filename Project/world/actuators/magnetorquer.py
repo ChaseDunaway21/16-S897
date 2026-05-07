@@ -25,7 +25,10 @@ DEFAULT_MTB_ORIENTATION = np.array(  # This also matches the ARGUS model
 
 
 class Magnetorquer:
-    """Six body-frame magnetorquers."""
+    """
+    Configurable Magnetorquer model.
+    ARGUS defaults to Six body-frame magnetorquers.
+    """
 
     def __init__(
         self,

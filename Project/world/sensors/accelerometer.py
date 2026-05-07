@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 import world.models.gravity as gravity
-from world.math import add_noise, covariance_matrix
+from Project.world.math_utils import add_noise, covariance_matrix
 from world.rotations_and_transformations import inertial_to_body
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math import skew_symmetric, unit_rows, unit_vector
+from Project.world.math_utils import skew_symmetric, unit_rows, unit_vector
 from world.rotations_and_transformations import attitude_jacobian as G
 from world.rotations_and_transformations import (
     H,

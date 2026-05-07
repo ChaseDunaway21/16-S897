@@ -18,7 +18,7 @@ import numpy as np
 from scipy.linalg import expm
 import spiceypy as spice
 
-from world.math import skew_symmetric
+from Project.world.math_utils import skew_symmetric
 from world.models.constants import RADIUS_EARTH, WGS84_FLATTENING
 
 # These are helper matrices directly from the Notes

@@ -16,7 +16,7 @@ from typing import Dict, Iterable
 import numpy as np
 import yaml
 
-from world.math import skew_symmetric
+from Project.world.math_utils import skew_symmetric
 from world.rotations_and_transformations import (
     R_body_to_inertial,
     quaternion_from_two_vectors,
