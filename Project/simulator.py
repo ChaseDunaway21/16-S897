@@ -20,12 +20,14 @@ from visualization import (
     plot_monte_carlo_trials as build_monte_carlo_plots,
     plot_simulation as build_simulation_plots,
 )
+from world.controller import MagnetorquerOnlyController, ReactionWheelTVLQRController
 from world.estimator import MEKF
 from world.models.constants import MU_EARTH
 from world.dynamics import environmental_acceleration, integrate_dynamics
 import world.models.gravity as gravity
 from world.models.solar_radiation_pressure import projected_area
 from world.models.sun import SunModel
+from world.actuators import ReactionWheel
 from world.sensors import (
     Accelerometer,
     Gyroscope,
@@ -187,6 +189,11 @@ class Simulator:
 
         self.idx = self.spacecraft.Idx["X"]
         self.environment_model: dict | None = None
+        self.actuator_model: dict | None = None
+        self.controller: (
+            ReactionWheelTVLQRController | MagnetorquerOnlyController | None
+        ) = None
+        self.controller_next_update_time: float = 0.0
         self.log_interval_steps = int(
             self._property_value(
                 self.cfg.get("simulation_properties", []), "log_interval_steps", 1000
@@ -194,6 +201,8 @@ class Simulator:
         )
         self.log_file = self._setup_logger()
         self.environment_model = self._setup_environment_model()
+        self.actuator_model = self._setup_actuator_model()
+        self.controller = self._setup_controller()
         if self.single_run_seed is not None:
             self.logger.info(
                 "Single non-ideal run uses deterministic sampled parameters with seed=%d",
@@ -424,6 +433,176 @@ class Simulator:
             initial_sun_area,
         )
         return environment_model
+
+    #################################################################################################
+    # ACTUATOR SETUP
+    #################################################################################################
+
+    def _setup_actuator_model(self) -> dict | None:
+        actuator_cfg = self.cfg.get("actuator_properties", {}) or {}
+        enabled = self._config_bool(
+            self._section_value(actuator_cfg, "enabled", False), False
+        )
+        if not enabled:
+            return None
+
+        actuator_model: dict[str, object] = {}
+        reaction_wheel_cfg = (
+            self._section_value(actuator_cfg, "reaction_wheel", {}) or {}
+        )
+        if isinstance(reaction_wheel_cfg, dict) and self._config_bool(
+            reaction_wheel_cfg.get("enabled"), False
+        ):
+            n_reaction_wheels = int(reaction_wheel_cfg.get("N_RWs", 3))
+            wheel_axes_body = np.asarray(
+                reaction_wheel_cfg.get("G_RW_b", np.eye(3)),
+                dtype=float,
+            )
+            actuator_model["reaction_wheel"] = ReactionWheel(
+                N_RWs=n_reaction_wheels,
+                max_torque=float(reaction_wheel_cfg.get("max_torque", 23e-6)),
+                max_angular_momentum=float(
+                    reaction_wheel_cfg.get("max_angular_momentum", 5.8e-4)
+                ),
+                G_RW_b=wheel_axes_body,
+            )
+            actuator_model["reaction_wheel_speeds"] = np.asarray(
+                reaction_wheel_cfg.get("wheel_speeds", np.zeros(n_reaction_wheels)),
+                dtype=float,
+            ).reshape(n_reaction_wheels)
+
+        enabled_names = []
+        if "reaction_wheel" in actuator_model:
+            enabled_names.append("reaction_wheel")
+        enabled_actuators = ", ".join(enabled_names) if enabled_names else "none"
+        self.logger.info("Enabled actuators: %s", enabled_actuators)
+        return actuator_model or None
+
+    #################################################################################################
+    # CONTROLLER SETUP AND UPDATES
+    #################################################################################################
+
+    def _setup_controller(
+        self,
+    ) -> ReactionWheelTVLQRController | MagnetorquerOnlyController | None:
+        controller_cfg = self.cfg.get("controller_properties", {}) or {}
+        enabled = self._config_bool(
+            self._section_value(controller_cfg, "enabled", False), False
+        )
+        if not enabled:
+            self.logger.info("Controller: disabled")
+            return None
+
+        controller_type = (
+            str(self._section_value(controller_cfg, "type", "reaction_wheel_tvlqr"))
+            .strip()
+            .lower()
+        )
+        update_rate_hz = float(
+            self._section_value(controller_cfg, "update_rate_hz", 0.0)
+        )
+        update_period_s = 0.0 if update_rate_hz <= 0.0 else 1.0 / update_rate_hz
+
+        if controller_type in {"reaction_wheel", "reaction_wheel_tvlqr", "tvlqr"}:
+            reaction_wheel_cfg = (
+                self._section_value(controller_cfg, "reaction_wheel_tvlqr", {}) or {}
+            )
+            n_reaction_wheels = int(
+                reaction_wheel_cfg.get(
+                    "N_RWs",
+                    self._reaction_wheel_count(default=3),
+                )
+            )
+            controller = ReactionWheelTVLQRController(
+                n_reaction_wheels=n_reaction_wheels,
+                wheel_speeds_command=reaction_wheel_cfg.get(
+                    "wheel_speeds_command",
+                    np.zeros(n_reaction_wheels),
+                ),
+                update_period_s=update_period_s,
+            )
+        elif controller_type in {"magnetorquer", "magnetorquer_only"}:
+            magnetorquer_cfg = (
+                self._section_value(controller_cfg, "magnetorquer_only", {}) or {}
+            )
+            n_magnetorquers = int(magnetorquer_cfg.get("N_MTBs", 6))
+            controller = MagnetorquerOnlyController(
+                n_magnetorquers=n_magnetorquers,
+                voltages_command=magnetorquer_cfg.get(
+                    "voltages_command", np.zeros(n_magnetorquers)
+                ),
+                update_period_s=update_period_s,
+            )
+        else:
+            raise ValueError(f"Unknown controller type: {controller_type}")
+
+        self.logger.info(
+            "Controller enabled: %s | update_period=%.6g s",
+            controller_type,
+            update_period_s,
+        )
+        return controller
+
+    def _reaction_wheel_count(self, default: int = 3) -> int:
+        if (
+            self.actuator_model
+            and self.actuator_model.get("reaction_wheel") is not None
+        ):
+            return int(self.actuator_model["reaction_wheel"].N_RWs)
+        return int(default)
+
+    def _apply_controller_command(self, command: np.ndarray) -> None:
+        if self.actuator_model is None:
+            return
+
+        if isinstance(self.controller, ReactionWheelTVLQRController):
+            reaction_wheel = self.actuator_model.get("reaction_wheel")
+            if reaction_wheel is not None:
+                self.actuator_model["reaction_wheel_speeds"] = np.asarray(
+                    command, dtype=float
+                ).reshape(reaction_wheel.N_RWs)
+            return
+
+        if isinstance(self.controller, MagnetorquerOnlyController):
+            self.actuator_model["magnetorquer_voltages"] = np.asarray(
+                command, dtype=float
+            ).reshape(-1)
+
+    def _estimator_state_for_controller(self) -> np.ndarray | None:
+        if not self.estimator_enabled or self.estimator is None:
+            return None
+        return self.estimator.get_state()
+
+    def _update_controller_command(
+        self, state: np.ndarray, time_s: float, force: bool = False
+    ) -> bool:
+        if self.controller is None:
+            return False
+
+        update_period = self.controller.update_period_s
+        if (
+            not force
+            and update_period > 0.0
+            and time_s + 1e-12 < self.controller_next_update_time
+        ):
+            return False
+
+        command = self.controller.compute_command(
+            state,
+            self.idx,
+            time_s,
+            spacecraft=self.spacecraft,
+            environment_model=self.environment_model,
+            actuator_model=self.actuator_model,
+            estimator_state=self._estimator_state_for_controller(),
+        )
+        self._apply_controller_command(command)
+
+        if update_period > 0.0:
+            while self.controller_next_update_time <= time_s + 1e-12:
+                self.controller_next_update_time += update_period
+
+        return True
 
     #################################################################################################
     # ESTIMATOR SETUP
@@ -1006,6 +1185,8 @@ class Simulator:
         history[0] = state
         self._reset_sensor_records()
         self._reset_estimator_records()
+        self.controller_next_update_time = 0.0
+        self._update_controller_command(state, 0.0, force=True)
         self._record_due_sensor_measurements(state, 0.0)
         self._record_estimator_state(0.0)
 
@@ -1014,12 +1195,14 @@ class Simulator:
 
         t = 0.0
         for k in range(1, num_steps + 1):
+            self._update_controller_command(state, t)
             state = integrate_dynamics(
                 self.spacecraft,
                 t,
                 self.dt,
                 method=self.integration_method,
                 environment_model=self.environment_model,
+                actuator_model=self.actuator_model,
             )
             t += self.dt
             times[k] = t
