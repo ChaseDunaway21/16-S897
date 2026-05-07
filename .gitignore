@@ -1,5 +1,6 @@
 __pycache__
+Class_Material/
+Project/kernels/
 .venv
 .ruff_cache
-Class_Material/
 *.png

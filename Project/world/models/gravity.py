@@ -16,12 +16,12 @@ import numpy as np
 from world.models.constants import MU_EARTH, J2, RADIUS_EARTH
 
 
-def acceleration(position: np.ndarray) -> np.ndarray:  # Eq 10.85 [1]
+def j2_acceleration(position: np.ndarray) -> np.ndarray:  # Eq 10.85 [1]
     """Compute gravitational acceleration."""
 
-    accel = spherical_acceleration(position) + j2_perturbation(position)
+    acceleration = spherical_acceleration(position) + j2_perturbation(position)
 
-    return accel
+    return acceleration
 
 
 def spherical_acceleration(position: np.ndarray) -> np.ndarray:  # Eq 10.85 [1]
@@ -43,24 +43,24 @@ def spherical_acceleration(position: np.ndarray) -> np.ndarray:  # Eq 10.85 [1]
 def j2_perturbation(position: np.ndarray) -> np.ndarray:  # Eq 10.103a [1]
     """J2 Perturbation model. Returns a 3x1 column vector."""
 
-    accel = np.zeros(3, dtype=float)
+    perturbation = np.zeros(3, dtype=float)
 
     J2_term = (3 / 2) * J2 * MU_EARTH * RADIUS_EARTH**2 / np.linalg.norm(position) ** 5
 
-    accel[0] = (
+    perturbation[0] = (
         J2_term
         * position[0]
         * (5 * (position[2] ** 2) / np.linalg.norm(position) ** 2 - 1)
     )
-    accel[1] = (
+    perturbation[1] = (
         J2_term
         * position[1]
         * (5 * (position[2] ** 2) / np.linalg.norm(position) ** 2 - 1)
     )
-    accel[2] = (
+    perturbation[2] = (
         J2_term
         * position[2]
         * (5 * (position[2] ** 2) / np.linalg.norm(position) ** 2 - 3)
     )
 
-    return accel
+    return perturbation
