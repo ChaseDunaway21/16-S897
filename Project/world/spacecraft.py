@@ -509,6 +509,82 @@ class Spacecraft:
         return com
 
     #################################################################################################
+    # SURFACE GEOMETRY
+    #################################################################################################
+
+    @staticmethod
+    def _face_center_offset(
+        face_name: str, normal: np.ndarray, component_dimensions: np.ndarray
+    ) -> np.ndarray:
+        """Return the component-center to face-center offset in body coordinates."""
+        axis_lookup = {"x": 0, "y": 1, "z": 2}
+        face_label = face_name.strip().lower()
+        normal = np.asarray(normal, dtype=float).reshape(3)
+        dimensions = np.asarray(component_dimensions, dtype=float).reshape(3)
+
+        if face_label[:1] in axis_lookup:
+            axis = axis_lookup[face_label[0]]
+            sign = -1.0 if face_label[1:2] == "-" else 1.0
+        else:
+            axis = int(np.argmax(np.abs(normal)))
+            sign = float(np.sign(normal[axis])) or 1.0
+
+        offset = np.zeros(3, dtype=float)
+        offset[axis] = sign * 0.5 * dimensions[axis]
+        return offset
+
+    def surface_geometry(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return exposed surface areas, body-frame normals, and COM-relative centers."""
+        areas: list[float] = []
+        normals: list[np.ndarray] = []
+        centers: list[np.ndarray] = []
+        center_of_mass = self.compute_center_of_mass()
+
+        for (
+            component_name,
+            component_center,
+            component_dimensions,
+            component_faces,
+            component_normals,
+        ) in zip(
+            self.names,
+            self.position_vectors,
+            self.dimension_vectors,
+            self.face_dimensions,
+            self.face_normals,
+        ):
+            for face_name, dimensions in component_faces.items():
+                if face_name not in component_normals:
+                    raise ValueError(
+                        f"{component_name}.{face_name} is missing a face normal"
+                    )
+
+                face_dimensions = np.asarray(dimensions, dtype=float).reshape(-1)
+                normal = np.asarray(component_normals[face_name], dtype=float).reshape(
+                    3
+                )
+                normal_norm = np.linalg.norm(normal)
+                if normal_norm == 0.0:
+                    raise ValueError(
+                        f"{component_name}.{face_name} has a zero face normal"
+                    )
+
+                face_center = (
+                    np.asarray(component_center, dtype=float)
+                    + self._face_center_offset(face_name, normal, component_dimensions)
+                    - center_of_mass
+                )
+                areas.append(float(np.prod(face_dimensions)))
+                normals.append(normal / normal_norm)
+                centers.append(face_center)
+
+        return (
+            np.asarray(areas, dtype=float),
+            np.vstack(normals) if normals else np.empty((0, 3), dtype=float),
+            np.vstack(centers) if centers else np.empty((0, 3), dtype=float),
+        )
+
+    #################################################################################################
     # SIMULATION COMPUTATIONS (INERTIA, DYNAMIC BALANCE)
     #################################################################################################
 

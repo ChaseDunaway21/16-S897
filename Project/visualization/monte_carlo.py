@@ -13,6 +13,11 @@ from .common import FIGURE_FACE_COLOR, save_figure, style_time_axis
 from .simulation_plotter import attitude_plot_values
 
 
+#################################################################################################
+# PLOT CONTEXT
+#################################################################################################
+
+
 class MonteCarloPlotContext(Protocol):
     idx: Mapping[str, Any]
     plot_layout: str
@@ -25,6 +30,11 @@ class MonteCarloPlotContext(Protocol):
     show_gyrostat_components: bool
     config_path: Path
     logger: logging.Logger
+
+
+#################################################################################################
+# COMPONENT FIGURES
+#################################################################################################
 
 
 def plot_monte_carlo_component_stack(
@@ -165,6 +175,11 @@ def plot_monte_carlo_overview(
     return fig
 
 
+#################################################################################################
+# OUTPUT PATHS
+#################################################################################################
+
+
 def monte_carlo_plot_paths(
     ctx: MonteCarloPlotContext,
     root_dir: str | Path,
@@ -206,6 +221,11 @@ def monte_carlo_plot_paths(
         "angular_velocity": base_path / "monte_carlo_angular_velocity.png",
         "rho": base_path / "monte_carlo_rho.png",
     }
+
+
+#################################################################################################
+# MONTE CARLO PLOT ORCHESTRATION
+#################################################################################################
 
 
 def plot_monte_carlo_trials(

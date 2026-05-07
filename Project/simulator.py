@@ -22,8 +22,9 @@ from visualization import (
 )
 from world.estimator import MEKF
 from world.models.constants import MU_EARTH
-from world.dynamics import integrate_dynamics
+from world.dynamics import environmental_acceleration, integrate_dynamics
 import world.models.gravity as gravity
+from world.models.solar_radiation_pressure import projected_area
 from world.models.sun import SunModel
 from world.sensors import (
     Accelerometer,
@@ -35,41 +36,12 @@ from world.sensors import (
 from world.spacecraft import Spacecraft
 
 
-def _run_single_monte_carlo_trial(
-    config_path: str,
-    output_dir: str,
-    save_plots: bool,
-) -> dict[str, object]:
-    """Run one Monte Carlo trial in an isolated output directory."""
-    run_dir = Path(output_dir)
-    sim = Simulator(config_path=Path(config_path), output_dir=run_dir)
-    result = sim.run(show_progress=False)
-    state_file = result.get("state_history_file") or str(run_dir / "state_history.npz")
-    if save_plots:
-        sim.plot_simulation(result, show=False)
-        if sim.show_momentum_sphere_plot:
-            sim.plot_momentum_sphere(result, show=False)
-
-    final_state = np.asarray(result["state_history_si"])[-1]
-    idx = sim.idx
-    return {
-        "status": "ok",
-        "output_dir": str(run_dir),
-        "log_file": str(result["log_file"]),
-        "state_file": str(state_file),
-        "sensor_file": result.get("sensor_history_file"),
-        "estimator_file": result.get("estimator_history_file"),
-        "num_steps": int(result["num_steps"]),
-        "final_position_m": final_state[idx["POS_ECI"]].tolist(),
-        "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
-        "final_attitude": final_state[idx["ATTITUDE"]].tolist(),
-        "final_omega_rads": final_state[idx["ATTITUDE_RATE"]].tolist(),
-        "final_rho_kgm2s": final_state[idx["RHO"]].tolist(),
-    }
-
-
 class Simulator:
     """Run Simulation of Satellite"""
+
+    #################################################################################################
+    # INITIALIZATION
+    #################################################################################################
 
     def __init__(
         self, config_path: str | Path, output_dir: str | Path | None = None
@@ -214,12 +186,14 @@ class Simulator:
             raise ValueError("Only rk4 integration_method is currently supported")
 
         self.idx = self.spacecraft.Idx["X"]
+        self.environment_model: dict | None = None
         self.log_interval_steps = int(
             self._property_value(
                 self.cfg.get("simulation_properties", []), "log_interval_steps", 1000
             )
         )
         self.log_file = self._setup_logger()
+        self.environment_model = self._setup_environment_model()
         if self.single_run_seed is not None:
             self.logger.info(
                 "Single non-ideal run uses deterministic sampled parameters with seed=%d",
@@ -227,6 +201,10 @@ class Simulator:
             )
         self._setup_sensors()
         self._setup_estimator()
+
+    #################################################################################################
+    # YAML CONFIG HELPERS
+    #################################################################################################
 
     @staticmethod
     def _property_value(
@@ -264,6 +242,14 @@ class Simulator:
         return option
 
     @staticmethod
+    def _section_value(section: object, name: str, default: object) -> object:
+        if isinstance(section, dict):
+            return section.get(name, default)
+        if isinstance(section, list):
+            return Simulator._property_value(section, name, default)
+        return default
+
+    @staticmethod
     def _config_bool(value: object, default: bool = False) -> bool:
         if value is None:
             return default
@@ -271,11 +257,9 @@ class Simulator:
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
-    @staticmethod
-    def _measurement_array(measurement: np.ndarray | None) -> np.ndarray:
-        if measurement is None:
-            return np.full(3, np.nan, dtype=float)
-        return np.asarray(measurement, dtype=float).reshape(-1)
+    #################################################################################################
+    # SENSOR SETUP
+    #################################################################################################
 
     def _sensor_update_period(
         self, sensor_name: str, sensor_cfg: dict, default_rate_hz: float
@@ -345,13 +329,7 @@ class Simulator:
 
         sun_sensor_cfg = sensor_properties.get("sun_sensor", {}) or {}
         if self._config_bool(sun_sensor_cfg.get("enabled"), True):
-            sun_model = SunModel(
-                direction_eci=self.spacecraft.sun_direction_eci,
-                use_spice=self._config_bool(sun_sensor_cfg.get("use_spice"), False),
-                require_spice=self._config_bool(
-                    sun_sensor_cfg.get("require_spice"), False
-                ),
-            )
+            sun_model = SunModel(kernel_paths=sun_sensor_cfg.get("kernel_paths", []))
             self.sensor_models["sun_sensor"] = SunSensor(
                 sun_model=sun_model,
                 covariance=sun_sensor_cfg.get("covariance"),
@@ -384,20 +362,72 @@ class Simulator:
         enabled = ", ".join(self.sensor_models) if self.sensor_models else "none"
         self.logger.info("Enabled sensors: %s", enabled)
 
-    def _save_state_history(
-        self, times: np.ndarray, history: np.ndarray
-    ) -> Path | None:
-        if times.size == 0 or history.size == 0:
+    #################################################################################################
+    # ENVIRONMENT SETUP
+    #################################################################################################
+
+    def _setup_environment_model(self) -> dict | None:
+        environment_cfg = self.cfg.get("environment_properties", {}) or {}
+        enabled = self._config_bool(
+            self._section_value(environment_cfg, "enabled", False), False
+        )
+        if not enabled:
             return None
 
-        state_file = self.output_dir / "state_history.npz"
-        np.savez_compressed(
-            state_file,
-            times_s=np.asarray(times, dtype=float),
-            state_history_si=np.asarray(history, dtype=float),
+        surface_areas, surface_normals, surface_centers = (
+            self.spacecraft.surface_geometry()
         )
-        self.logger.info("State history saved: %s", state_file)
-        return state_file
+        use_surface_geometry = self._config_bool(
+            self._section_value(environment_cfg, "use_surface_geometry", True), True
+        )
+
+        environment_model = {
+            "use_drag": self._config_bool(
+                self._section_value(environment_cfg, "use_drag", True), True
+            ),
+            "use_srp": self._config_bool(
+                self._section_value(environment_cfg, "use_srp", True), True
+            ),
+            "drag_coefficient": float(
+                self._section_value(environment_cfg, "drag_coefficient", 2.2)
+            ),
+            "coefficient_reflectivity": float(
+                self._section_value(environment_cfg, "coefficient_reflectivity", 1.2)
+            ),
+            "reference_area_m2": float(
+                self._section_value(environment_cfg, "reference_area_m2", 0.01)
+            ),
+            "mass_kg": float(np.sum(self.spacecraft.mass_vector)),
+            "sun_model": SunModel(
+                kernel_paths=self._section_value(environment_cfg, "kernel_paths", [])
+            ),
+        }
+
+        if use_surface_geometry:
+            environment_model["surface_areas_m2"] = surface_areas
+            environment_model["surface_normals_body"] = surface_normals
+            environment_model["surface_centers_body"] = surface_centers
+
+        initial_sun_area = projected_area(
+            self.spacecraft.attitude,
+            self.spacecraft.sun_direction_eci,
+            surface_areas,
+            surface_normals,
+        )
+        self.logger.info(
+            "Environment models: drag=%s | srp=%s | surface_geometry=%s | surfaces=%d | physical surface area=%.6g m^2 | initial projected sun area=%.6g m^2",
+            environment_model["use_drag"],
+            environment_model["use_srp"],
+            use_surface_geometry,
+            surface_areas.size,
+            float(np.sum(surface_areas)),
+            initial_sun_area,
+        )
+        return environment_model
+
+    #################################################################################################
+    # ESTIMATOR SETUP
+    #################################################################################################
 
     def _setup_estimator(self) -> None:
         estimator_cfg = self.cfg.get("estimator_properties", {}) or {}
@@ -451,6 +481,10 @@ class Simulator:
         self.estimator.set_state(estimator_state)
         self.logger.info("MEKF estimator enabled")
 
+    #################################################################################################
+    # SENSOR AND ESTIMATOR UPDATES
+    #################################################################################################
+
     def _reset_sensor_records(self) -> None:
         self.sensor_records = {
             name: {"times_s": [], "measurements": []} for name in self.sensor_models
@@ -461,11 +495,21 @@ class Simulator:
         self.estimator_records = {"times_s": [], "states": [], "sigmas": []}
         self.latest_gyro_measurement = None
 
+    @staticmethod
+    def _measurement_array(measurement: np.ndarray | None) -> np.ndarray:
+        if measurement is None:
+            return np.full(3, np.nan, dtype=float)
+        return np.asarray(measurement, dtype=float).reshape(-1)
+
     def _sensor_measurement(
         self, sensor_name: str, sensor_model: object, state: np.ndarray, time_s: float
     ) -> np.ndarray | None:
         if sensor_name == "accelerometer":
-            acceleration_eci = gravity.acceleration(state[self.idx["POS_ECI"]])
+            acceleration_eci = gravity.j2_acceleration(
+                state[self.idx["POS_ECI"]]
+            ) + environmental_acceleration(
+                state, self.idx, time_s, self.environment_model
+            )
             return sensor_model.get_measurement(
                 state, self.idx, time_s, acceleration_eci=acceleration_eci
             )
@@ -560,6 +604,25 @@ class Simulator:
         self.estimator_records["states"].append(self.estimator.get_state())
         self.estimator_records["sigmas"].append(self.estimator.get_uncertainty_sigma())
 
+    #################################################################################################
+    # RESULT HISTORY PERSISTENCE
+    #################################################################################################
+
+    def _save_state_history(
+        self, times: np.ndarray, history: np.ndarray
+    ) -> Path | None:
+        if times.size == 0 or history.size == 0:
+            return None
+
+        state_file = self.output_dir / "state_history.npz"
+        np.savez_compressed(
+            state_file,
+            times_s=np.asarray(times, dtype=float),
+            state_history_si=np.asarray(history, dtype=float),
+        )
+        self.logger.info("State history saved: %s", state_file)
+        return state_file
+
     def _sensor_history_arrays(self) -> dict[str, dict[str, np.ndarray]]:
         sensor_history = {}
         for sensor_name, records in self.sensor_records.items():
@@ -619,6 +682,10 @@ class Simulator:
         np.savez_compressed(estimator_file, **estimator_history)
         self.logger.info("Estimator history saved: %s", estimator_file)
         return estimator_file
+
+    #################################################################################################
+    # MONTE CARLO HELPERS AND EXECUTION
+    #################################################################################################
 
     @staticmethod
     def _sample_with_uncertainty(
@@ -697,6 +764,101 @@ class Simulator:
             sensor_properties["seed"] = seed + trial_index
 
         return trial_cfg
+
+    def run_monte_carlo(
+        self,
+        trials: int | None = None,
+        max_workers: int | None = None,
+        seed: int | None = None,
+        save_plots: bool = False,
+        show_progress: bool = True,
+    ) -> dict[str, object]:
+        """Run Monte Carlo trials in parallel and store each trial in its own folder."""
+        sim_props = self.cfg.get("simulation_properties", []) or []
+        mc_item = self._property_item(sim_props, "monte_carlo") or {}
+
+        mc_enabled = bool(mc_item.get("value", False))
+        if not mc_enabled:
+            raise ValueError("monte_carlo is disabled in simulation_properties")
+
+        total_trials = int(trials if trials is not None else mc_item.get("trials", 1))
+        if total_trials <= 0:
+            raise ValueError("Monte Carlo trials must be positive")
+
+        base_seed = int(seed if seed is not None else mc_item.get("seed", 42))
+        default_root = (
+            self.output_dir
+            if self._output_dir_explicit
+            else (self.config_path.parent / "results")
+        )
+        mc_root = default_root / "monte_carlo"
+        root_dir = mc_root / datetime.now().strftime("%Y%m%d_%H%M%S")
+        root_dir.mkdir(parents=True, exist_ok=True)
+
+        trial_jobs: list[tuple[str, str, bool]] = []
+        for i in range(total_trials):
+            run_dir = root_dir / f"run_{i + 1:04d}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            run_cfg = self._build_trial_config(i, base_seed)
+            run_cfg_path = run_dir / "config.yaml"
+            with run_cfg_path.open("w", encoding="utf-8") as file:
+                yaml.safe_dump(run_cfg, file, sort_keys=False)
+            trial_jobs.append((str(run_cfg_path), str(run_dir), save_plots))
+
+        if max_workers is None:
+            cpu_count = os.cpu_count() or 1
+            max_workers = min(total_trials, max(1, cpu_count - 1))
+        max_workers = max(1, int(max_workers))
+
+        summaries: list[dict[str, object]] = []
+        completed_trials = 0
+        if show_progress:
+            self._print_progress(
+                "Monte Carlo", completed_trials, total_trials, "trials"
+            )
+
+        if max_workers == 1:
+            for job in trial_jobs:
+                summaries.append(_run_single_monte_carlo_trial(*job))
+                completed_trials += 1
+                if show_progress:
+                    self._print_progress(
+                        "Monte Carlo", completed_trials, total_trials, "trials"
+                    )
+        else:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(_run_single_monte_carlo_trial, *job)
+                    for job in trial_jobs
+                ]
+                for future in as_completed(futures):
+                    summaries.append(future.result())
+                    completed_trials += 1
+                    if show_progress:
+                        self._print_progress(
+                            "Monte Carlo", completed_trials, total_trials, "trials"
+                        )
+
+        summaries.sort(key=lambda item: str(item.get("output_dir", "")))
+
+        summary_payload = {
+            "root_dir": str(root_dir),
+            "trials": total_trials,
+            "seed": base_seed,
+            "max_workers": max_workers,
+            "completed": sum(1 for item in summaries if item.get("status") == "ok"),
+            "runs": summaries,
+        }
+
+        summary_path = root_dir / "summary.yaml"
+        with summary_path.open("w", encoding="utf-8") as file:
+            yaml.safe_dump(summary_payload, file, sort_keys=False)
+
+        return summary_payload
+
+    #################################################################################################
+    # LOGGING AND PROGRESS
+    #################################################################################################
 
     @staticmethod
     def _orbit_period_seconds(position_m: np.ndarray) -> float:
@@ -791,6 +953,10 @@ class Simulator:
             sys.stdout.write("\n")
         sys.stdout.flush()
 
+    #################################################################################################
+    # SIMULATION EXECUTION
+    #################################################################################################
+
     def run(self, show_progress: bool = True) -> dict[str, object]:
         state = self.spacecraft.get_state().astype(float, copy=True)
 
@@ -807,7 +973,7 @@ class Simulator:
         rho = state[self.idx["RHO"]]
         if self.spacecraft.safe_mode_enabled:
             rho_message = (
-                f"Dynamic balance rho (Jeff = J_33 * {self.spacecraft.J_33_multiplier:.6g}): "
+                f"Safe Mode: D.B. rho (J_eff = J_33 * {self.spacecraft.J_33_multiplier:.6g}): "
                 f"{self._vector_to_string(rho)} [kg m^2/s] "
                 f" | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
             )
@@ -817,8 +983,6 @@ class Simulator:
                 f"[kg m^2/s] | rho magnitude: {np.linalg.norm(rho):.6g} [kg m^2/s]"
             )
         self.logger.info(rho_message)
-        if show_progress or self.spacecraft.debug:
-            print(rho_message)
         if self.spacecraft.safe_mode_enabled:
             desired_omega = (
                 self.spacecraft.desired_spin_rate * self.spacecraft.desired_spin_axis
@@ -855,6 +1019,7 @@ class Simulator:
                 t,
                 self.dt,
                 method=self.integration_method,
+                environment_model=self.environment_model,
             )
             t += self.dt
             times[k] = t
@@ -918,96 +1083,9 @@ class Simulator:
             ),
         }
 
-    def run_monte_carlo(
-        self,
-        trials: int | None = None,
-        max_workers: int | None = None,
-        seed: int | None = None,
-        save_plots: bool = False,
-        show_progress: bool = True,
-    ) -> dict[str, object]:
-        """Run Monte Carlo trials in parallel and store each trial in its own folder."""
-        sim_props = self.cfg.get("simulation_properties", []) or []
-        mc_item = self._property_item(sim_props, "monte_carlo") or {}
-
-        mc_enabled = bool(mc_item.get("value", False))
-        if not mc_enabled:
-            raise ValueError("monte_carlo is disabled in simulation_properties")
-
-        total_trials = int(trials if trials is not None else mc_item.get("trials", 1))
-        if total_trials <= 0:
-            raise ValueError("Monte Carlo trials must be positive")
-
-        base_seed = int(seed if seed is not None else mc_item.get("seed", 42))
-        default_root = (
-            self.output_dir
-            if self._output_dir_explicit
-            else (self.config_path.parent / "results")
-        )
-        mc_root = default_root / "monte_carlo"
-        root_dir = mc_root / datetime.now().strftime("%Y%m%d_%H%M%S")
-        root_dir.mkdir(parents=True, exist_ok=True)
-
-        trial_jobs: list[tuple[str, str, bool]] = []
-        for i in range(total_trials):
-            run_dir = root_dir / f"run_{i + 1:04d}"
-            run_dir.mkdir(parents=True, exist_ok=True)
-            run_cfg = self._build_trial_config(i, base_seed)
-            run_cfg_path = run_dir / "config.yaml"
-            with run_cfg_path.open("w", encoding="utf-8") as file:
-                yaml.safe_dump(run_cfg, file, sort_keys=False)
-            trial_jobs.append((str(run_cfg_path), str(run_dir), save_plots))
-
-        if max_workers is None:
-            cpu_count = os.cpu_count() or 1
-            max_workers = min(total_trials, max(1, cpu_count - 1))
-        max_workers = max(1, int(max_workers))
-
-        summaries: list[dict[str, object]] = []
-        completed_trials = 0
-        if show_progress:
-            self._print_progress(
-                "Monte Carlo", completed_trials, total_trials, "trials"
-            )
-
-        if max_workers == 1:
-            for job in trial_jobs:
-                summaries.append(_run_single_monte_carlo_trial(*job))
-                completed_trials += 1
-                if show_progress:
-                    self._print_progress(
-                        "Monte Carlo", completed_trials, total_trials, "trials"
-                    )
-        else:
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(_run_single_monte_carlo_trial, *job)
-                    for job in trial_jobs
-                ]
-                for future in as_completed(futures):
-                    summaries.append(future.result())
-                    completed_trials += 1
-                    if show_progress:
-                        self._print_progress(
-                            "Monte Carlo", completed_trials, total_trials, "trials"
-                        )
-
-        summaries.sort(key=lambda item: str(item.get("output_dir", "")))
-
-        summary_payload = {
-            "root_dir": str(root_dir),
-            "trials": total_trials,
-            "seed": base_seed,
-            "max_workers": max_workers,
-            "completed": sum(1 for item in summaries if item.get("status") == "ok"),
-            "runs": summaries,
-        }
-
-        summary_path = root_dir / "summary.yaml"
-        with summary_path.open("w", encoding="utf-8") as file:
-            yaml.safe_dump(summary_payload, file, sort_keys=False)
-
-        return summary_payload
+    #################################################################################################
+    # PLOTTING
+    #################################################################################################
 
     def plot_simulation(
         self,
@@ -1048,3 +1126,41 @@ class Simulator:
         # TODO
 
         return
+
+
+#################################################################################################
+# MONTE CARLO WORKER
+#################################################################################################
+
+
+def _run_single_monte_carlo_trial(
+    config_path: str,
+    output_dir: str,
+    save_plots: bool,
+) -> dict[str, object]:
+    """Run one Monte Carlo trial in an isolated output directory."""
+    run_dir = Path(output_dir)
+    sim = Simulator(config_path=Path(config_path), output_dir=run_dir)
+    result = sim.run(show_progress=False)
+    state_file = result.get("state_history_file") or str(run_dir / "state_history.npz")
+    if save_plots:
+        sim.plot_simulation(result, show=False)
+        if sim.show_momentum_sphere_plot:
+            sim.plot_momentum_sphere(result, show=False)
+
+    final_state = np.asarray(result["state_history_si"])[-1]
+    idx = sim.idx
+    return {
+        "status": "ok",
+        "output_dir": str(run_dir),
+        "log_file": str(result["log_file"]),
+        "state_file": str(state_file),
+        "sensor_file": result.get("sensor_history_file"),
+        "estimator_file": result.get("estimator_history_file"),
+        "num_steps": int(result["num_steps"]),
+        "final_position_m": final_state[idx["POS_ECI"]].tolist(),
+        "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
+        "final_attitude": final_state[idx["ATTITUDE"]].tolist(),
+        "final_omega_rads": final_state[idx["ATTITUDE_RATE"]].tolist(),
+        "final_rho_kgm2s": final_state[idx["RHO"]].tolist(),
+    }

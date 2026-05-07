@@ -1,7 +1,9 @@
 """ARGUS style magnetorquer model.
 
-This follows the shape of the GNC-Simulation magnetorquer actuator:
-store the torquer constants and body-frame orientation matrix, then compute
+This model is heavily inspired by GNC-Simulation:
+https://github.com/cmu-argus-2/GNC-Simulation.
+
+Store the torquer constants and body-frame orientation matrix, then compute
 the body-frame torque from commanded voltages and the local magnetic field.
 """
 
@@ -50,10 +52,6 @@ class Magnetorquer:
         self.max_power = float(max_power)
 
         self.G_MTB_b = np.asarray(G_MTB_b, dtype=float)
-        if self.G_MTB_b.shape == (self.N_MTBs, 3):
-            self.G_MTB_b = self.G_MTB_b.T
-        if self.G_MTB_b.shape != (3, self.N_MTBs):
-            raise ValueError(f"G_MTB_b must be 3x{self.N_MTBs}")
 
     def get_torque(
         self,

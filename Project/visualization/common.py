@@ -12,6 +12,11 @@ FIGURE_FACE_COLOR = "#f7f8fa"
 AXIS_FACE_COLOR = "#f2f4f8"
 
 
+#################################################################################################
+# PATH AND AXIS HELPERS
+#################################################################################################
+
+
 def default_plot_dir(output_dir: Path | None, config_path: Path) -> Path:
     return output_dir if output_dir is not None else (config_path.parent / "results")
 
@@ -35,6 +40,11 @@ def set_equal_orbit_axes(ax: plt.Axes, pos_km: np.ndarray) -> None:
     ax.set_ylim(y_mid - half_range, y_mid + half_range)
     ax.set_zlim(z_mid - half_range, z_mid + half_range)
     ax.set_box_aspect((1.0, 1.0, 1.0))
+
+
+#################################################################################################
+# FIGURE OUTPUT
+#################################################################################################
 
 
 def save_figure(

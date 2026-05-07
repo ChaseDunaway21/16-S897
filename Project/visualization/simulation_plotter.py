@@ -26,6 +26,11 @@ from world.rotations_and_transformations import (
 from world.models.constants import EARTH_RADIUS_KM
 
 
+#################################################################################################
+# PLOT CONTEXT
+#################################################################################################
+
+
 class SimulationPlotContext(Protocol):
     idx: Mapping[str, Any]
     plot_layout: str
@@ -48,6 +53,10 @@ class SimulationPlotContext(Protocol):
     config_path: Path
     logger: logging.Logger
 
+
+#################################################################################################
+# PLOT CONSTANTS
+#################################################################################################
 
 SENSOR_PLOT_SPEC = {
     "magnetometer": (
@@ -77,6 +86,11 @@ SENSOR_PLOT_SPEC = {
     ),
 }
 SENSOR_COLORS = ["#2563eb", "#f97316", "#059669", "#7c3aed"]
+
+
+#################################################################################################
+# ATTITUDE PLOT HELPERS
+#################################################################################################
 
 
 def attitude_plot_values(
@@ -113,6 +127,11 @@ def attitude_plot_spec(
         "title": "Euler Angle Components",
         "filename": "simulation_attitude_euler.png",
     }
+
+
+#################################################################################################
+# OUTPUT PATHS
+#################################################################################################
 
 
 def simulation_plot_paths(
@@ -188,6 +207,11 @@ def simulation_plot_paths(
         "camera_measurements": base_path / "simulation_camera_measurements.png",
         "estimator": base_path / "simulation_estimator.png",
     }
+
+
+#################################################################################################
+# TRAJECTORY PLOTS
+#################################################################################################
 
 
 def orbit_extent_points(pos_km: np.ndarray) -> np.ndarray:
@@ -270,6 +294,11 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
     set_equal_orbit_axes(ax, orbit_extent_points(pos_km))
     fig.tight_layout()
     return fig
+
+
+#################################################################################################
+# CAMERA MEASUREMENT PLOTS
+#################################################################################################
 
 
 def camera_measurement_samples(
@@ -422,6 +451,11 @@ def plot_camera_measurement_figure(
     return fig
 
 
+#################################################################################################
+# STATE COMPONENT PLOTS
+#################################################################################################
+
+
 def plot_velocity_figure(times: np.ndarray, vel_kms: np.ndarray) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(12, 5), facecolor=FIGURE_FACE_COLOR)
     style_time_axis(ax)
@@ -569,6 +603,11 @@ def plot_component_overlay(
     return fig
 
 
+#################################################################################################
+# SENSOR PLOTS
+#################################################################################################
+
+
 def sensor_plot_items(
     sensor_history: Mapping[str, Mapping[str, object]],
 ) -> list[dict[str, object]]:
@@ -676,6 +715,11 @@ def plot_sensor_measurements(
     axes_array[-1].set_xlabel("time [s]")
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
     return fig
+
+
+#################################################################################################
+# ESTIMATOR PLOT HELPERS
+#################################################################################################
 
 
 def nearest_time_indices(
@@ -904,6 +948,11 @@ def plot_estimator_figure(
     return fig
 
 
+#################################################################################################
+# SIMULATION OVERVIEW
+#################################################################################################
+
+
 def plot_simulation_overview(
     ctx: SimulationPlotContext,
     times: np.ndarray,
@@ -1099,6 +1148,11 @@ def plot_simulation_overview(
 
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.965))
     return fig
+
+
+#################################################################################################
+# SIMULATION PLOT ORCHESTRATION
+#################################################################################################
 
 
 def plot_simulation(

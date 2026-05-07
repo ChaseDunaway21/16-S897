@@ -11,7 +11,7 @@ simulation_properties:
     value: 0.1 # seconds
 
   - name: max_simulation_time
-    value: 200.0 # seconds
+    value: 1000.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -106,8 +106,8 @@ physical_properties:
         z+: [0.1, 0.082]
         z-: [0.1, 0.082]
       face_normals: 
-        z+: [1.0, 0.0, 0.0]
-        z-: [-1.0, 0.0, 0.0]
+        z+: [0.0, 0.0, 1.0]
+        z-: [0.0, 0.0, -1.0]
     geometric_center:
       x: 0.1 # m
       y: 0.0 # m
@@ -128,8 +128,8 @@ physical_properties:
         z+: [0.1, 0.082]
         z-: [0.1, 0.082]
       face_normals: # unit normal
-        z+: [1.0, 0.0, 0.0]
-        z-: [-1.0, 0.0, 0.0]
+        z+: [0.0, 0.0, 1.0]
+        z-: [0.0, 0.0, -1.0]
     geometric_center:
       x: -0.1 # m
       y: 0.0 # m
@@ -150,8 +150,8 @@ physical_properties:
         z+: [0.082, 0.1]
         z-: [0.082, 0.1]
       face_normals: # unit normal
-        z+: [0.0, 1.0, 0.0]
-        z-: [0.0, -1.0, 0.0]
+        z+: [0.0, 0.0, 1.0]
+        z-: [0.0, 0.0, -1.0]
     geometric_center:
       x: 0.0 # m
       y: 0.1 # m
@@ -172,8 +172,8 @@ physical_properties:
         z+: [0.082, 0.1]
         z-: [0.082, 0.1]
       face_normals: # unit normal
-        z+: [0.0, 1.0, 0.0]
-        z-: [0.0, -1.0, 0.0]
+        z+: [0.0, 0.0, 1.0]
+        z-: [0.0, 0.0, -1.0]
     geometric_center:
       x: 0.0 # m
       y: -0.1 # m
@@ -209,6 +209,18 @@ integration_properties:
   - name: integration_method
     value: rk4
 
+environment_properties:
+  enabled: True
+  use_drag: True
+  use_srp: True
+  use_surface_geometry: True
+  kernel_paths:
+    - Project/kernels/naif0012.tls
+    - Project/kernels/de442s.bsp
+  drag_coefficient: 2.2
+  coefficient_reflectivity: 1.2
+  reference_area_m2: 0.01
+
 sensor_properties:
   enabled: True
   update_rate_hz: 1.0
@@ -236,6 +248,9 @@ sensor_properties:
   sun_sensor:
     enabled: True
     update_rate_hz: 0.1
+    kernel_paths:
+      - Project/kernels/naif0012.tls
+      - Project/kernels/de442s.bsp
     bias: [0.0, 0.0, 0.0] # unit-vector bias
     covariance: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]] # unit-vector covariance
 

@@ -14,12 +14,22 @@ from matplotlib.lines import Line2D
 from .common import AXIS_FACE_COLOR, FIGURE_FACE_COLOR, default_plot_dir, save_figure
 
 
+#################################################################################################
+# PLOT CONTEXT
+#################################################################################################
+
+
 class MomentumPlotContext(Protocol):
     idx: Mapping[str, Any]
     output_dir: Path | None
     config_path: Path
     logger: logging.Logger
     spacecraft: Any
+
+
+#################################################################################################
+# MOMENTUM SPHERE PLOT
+#################################################################################################
 
 
 def plot_momentum_sphere(

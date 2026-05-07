@@ -54,7 +54,7 @@ class Accelerometer:
         else:
             specific_force_eci = np.asarray(
                 acceleration_eci, dtype=float
-            ) - gravity.acceleration(position)  # [1]
+            ) - gravity.j2_acceleration(position)  # [1]
         ideal_measurement = inertial_to_body(q, specific_force_eci)
         return ACCELEROMETER_MODEL @ ideal_measurement + self.bias
 

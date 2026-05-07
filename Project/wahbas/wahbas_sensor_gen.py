@@ -50,11 +50,7 @@ def enabled_wahba_sensors(  # Only the vector sensors can be used, so all but th
     sun_sensor_cfg = sensor_cfg.get("sun_sensor", {}) or {}
     if config_bool(sun_sensor_cfg.get("enabled"), True):
         sensors["sun_sensor"] = SunSensor(
-            sun_model=SunModel(
-                direction_eci=spacecraft.sun_direction_eci,
-                use_spice=config_bool(sun_sensor_cfg.get("use_spice")),
-                require_spice=config_bool(sun_sensor_cfg.get("require_spice")),
-            ),
+            sun_model=SunModel(kernel_paths=sun_sensor_cfg.get("kernel_paths", [])),
             covariance=sun_sensor_cfg.get("covariance"),
             bias=sun_sensor_cfg.get("bias"),
             rng=rng,
