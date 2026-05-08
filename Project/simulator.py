@@ -346,7 +346,7 @@ class Simulator:
             sun_model = SunModel(kernel_paths=sun_sensor_cfg.get("kernel_paths", []))
             self.sensor_models["sun_sensor"] = SunSensor(
                 sun_model=sun_model,
-                covariance=sun_sensor_cfg.get("covariance"),
+                sigma_angle_deg=float(sun_sensor_cfg.get("sigma_angle_deg", 0.0)),
                 bias=sun_sensor_cfg.get("bias"),
                 rng=np.random.default_rng(base_seed + 4),
                 return_none_if_eclipsed=self._config_bool(
@@ -360,7 +360,7 @@ class Simulator:
         visual_camera_cfg = sensor_properties.get("visual_camera", {}) or {}
         if self._config_bool(visual_camera_cfg.get("enabled"), True):
             self.sensor_models["visual_camera"] = VisualCamera(
-                covariance=visual_camera_cfg.get("covariance"),
+                sigma_angle_deg=float(visual_camera_cfg.get("sigma_angle_deg", 0.0)),
                 bias=visual_camera_cfg.get("bias"),
                 rng=np.random.default_rng(base_seed + 5),
             )
@@ -458,13 +458,11 @@ class Simulator:
         if isinstance(reaction_wheel_cfg, dict) and self._config_bool(
             reaction_wheel_cfg.get("enabled"), False
         ):
-            n_reaction_wheels = int(reaction_wheel_cfg.get("N_RWs", 3))
             wheel_axes_body = np.asarray(
                 reaction_wheel_cfg.get("G_RW_b", np.eye(3)),
                 dtype=float,
             )
             actuator_model["reaction_wheel"] = ReactionWheel(
-                N_RWs=n_reaction_wheels,
                 max_torque=float(reaction_wheel_cfg.get("max_torque", 23e-6)),
                 max_angular_momentum=float(
                     reaction_wheel_cfg.get("max_angular_momentum", 5.8e-4)
@@ -472,9 +470,9 @@ class Simulator:
                 G_RW_b=wheel_axes_body,
             )
             actuator_model["reaction_wheel_speeds"] = np.asarray(
-                reaction_wheel_cfg.get("wheel_speeds", np.zeros(n_reaction_wheels)),
+                reaction_wheel_cfg.get("wheel_speeds", np.zeros(3)),
                 dtype=float,
-            ).reshape(n_reaction_wheels)
+            ).reshape(3)
 
         magnetorquer_cfg = self._section_value(actuator_cfg, "magnetorquer", {}) or {}
         if isinstance(magnetorquer_cfg, dict) and self._config_bool(
@@ -552,18 +550,14 @@ class Simulator:
                 if self.actuator_model is None
                 else self.actuator_model.get("reaction_wheel")
             )
-            n_reaction_wheels = int(
-                reaction_wheel_cfg.get(
-                    "N_RWs",
-                    self._reaction_wheel_count(default=3),
-                )
-            )
             wheel_axes_body = None if reaction_wheel is None else reaction_wheel.G_RW_b
             wheel_max_torque = (
-                23e-6 if reaction_wheel is None else reaction_wheel.max_torque
+                23e-6
+                if reaction_wheel is None
+                else reaction_wheel.max_torque  # Default value for the RW1
             )
             wheel_max_angular_momentum = (
-                5.8e-4
+                5.8e-4  # Default value for the RW1
                 if reaction_wheel is None
                 else reaction_wheel.max_angular_momentum
             )
@@ -574,7 +568,6 @@ class Simulator:
                 )
             controller = ReactionWheelTVLQRController(
                 target_attitude=target_attitude,
-                n_reaction_wheels=n_reaction_wheels,
                 update_period_s=update_period_s,
                 inertia_tensor=self.spacecraft.inertia_tensor,
                 target_rate_body=reaction_wheel_cfg.get("target_rate_body"),
@@ -625,14 +618,6 @@ class Simulator:
         )
         return controller
 
-    def _reaction_wheel_count(self, default: int = 3) -> int:
-        if (
-            self.actuator_model
-            and self.actuator_model.get("reaction_wheel") is not None
-        ):
-            return int(self.actuator_model["reaction_wheel"].N_RWs)
-        return int(default)
-
     def _apply_controller_command(self, command: np.ndarray) -> None:
         if self.actuator_model is None:
             return
@@ -642,7 +627,7 @@ class Simulator:
             if reaction_wheel is not None:
                 self.actuator_model["reaction_wheel_speeds"] = np.asarray(
                     command, dtype=float
-                ).reshape(reaction_wheel.N_RWs)
+                ).reshape(3)
             return
 
         if isinstance(self.controller, MagnetorquerOnlyController):
@@ -650,10 +635,20 @@ class Simulator:
                 command, dtype=float
             ).reshape(-1)
 
-    def _estimator_state_for_controller(self) -> np.ndarray | None:
+    def _estimator_state_for_controller(self, state: np.ndarray) -> np.ndarray | None:
         if not self.estimator_enabled or self.estimator is None:
             return None
-        return self.estimator.get_state()
+
+        # The angular rate component is just the gyro input minus the estimated bias
+        # However, this is so noisy that high frequncy commands start to dominate
+        estimator_state = self.estimator.get_state()
+        controller_state = np.asarray(state, dtype=float).copy()
+        controller_state[self.idx["ATTITUDE"]] = estimator_state[0:4]
+        if self.latest_gyro_measurement is not None:
+            controller_state[self.idx["ATTITUDE_RATE"]] = (
+                self.latest_gyro_measurement - estimator_state[4:7]
+            )
+        return controller_state
 
     def _update_controller_command(
         self, state: np.ndarray, time_s: float, force: bool = False
@@ -676,7 +671,7 @@ class Simulator:
             spacecraft=self.spacecraft,
             environment_model=self.environment_model,
             actuator_model=self.actuator_model,
-            estimator_state=self._estimator_state_for_controller(),
+            estimator_state=self._estimator_state_for_controller(state),
         )
         self._apply_controller_command(command)
 
@@ -698,6 +693,7 @@ class Simulator:
             "times_s": [],
             "states": [],
             "sigmas": [],
+            "gyro_bias_truth": [],
         }
         self.latest_gyro_measurement: np.ndarray | None = None
 
@@ -753,7 +749,12 @@ class Simulator:
         self.sensor_next_update_times = {name: 0.0 for name in self.sensor_models}
 
     def _reset_estimator_records(self) -> None:
-        self.estimator_records = {"times_s": [], "states": [], "sigmas": []}
+        self.estimator_records = {
+            "times_s": [],
+            "states": [],
+            "sigmas": [],
+            "gyro_bias_truth": [],
+        }
         self.latest_gyro_measurement = None
 
     @staticmethod
@@ -817,11 +818,23 @@ class Simulator:
             return True
         elif sensor_name == "sun_sensor":
             sun_eci = sensor_model.sun_model.direction_eci(position, time_s)
-            self.estimator.sun_sensor_update(measurement_array, sun_eci)
+            self.estimator.vector_update(
+                measurement_array,
+                sun_eci,
+                sigma_direction=getattr(
+                    sensor_model,
+                    "sigma_angle_rad",
+                    self.estimator.sigma_sunsensor_direction,
+                ),
+            )
             return True
         elif sensor_name == "visual_camera":
             target_eci = self.sensor_targets["visual_camera"]
-            self.estimator.vector_update(measurement_array, target_eci - position)
+            self.estimator.vector_update(
+                measurement_array,
+                target_eci - position,
+                sigma_direction=getattr(sensor_model, "sigma_angle_rad", 0.0),
+            )
             return True
 
         return False
@@ -864,6 +877,13 @@ class Simulator:
         self.estimator_records["times_s"].append(float(time_s))
         self.estimator_records["states"].append(self.estimator.get_state())
         self.estimator_records["sigmas"].append(self.estimator.get_uncertainty_sigma())
+        gyroscope = self.sensor_models.get("gyroscope")
+        if gyroscope is not None and hasattr(gyroscope, "bias"):
+            self.estimator_records["gyro_bias_truth"].append(
+                np.asarray(gyroscope.bias, dtype=float).reshape(3).copy()
+            )
+        else:
+            self.estimator_records["gyro_bias_truth"].append(np.full(3, np.nan))
 
     #################################################################################################
     # RESULT HISTORY PERSISTENCE
@@ -903,6 +923,7 @@ class Simulator:
             return {}
         states = self.estimator_records["states"]
         sigmas = self.estimator_records["sigmas"]
+        gyro_bias_truth = self.estimator_records.get("gyro_bias_truth", [])
         return {
             "times_s": np.asarray(self.estimator_records["times_s"], dtype=float),
             "state_estimates": (
@@ -914,6 +935,11 @@ class Simulator:
                 np.asarray(sigmas, dtype=float)
                 if sigmas
                 else np.empty((0, 6), dtype=float)
+            ),
+            "gyro_bias_truth": (
+                np.asarray(gyro_bias_truth, dtype=float)
+                if gyro_bias_truth
+                else np.empty((0, 3), dtype=float)
             ),
         }
 
@@ -1213,9 +1239,7 @@ class Simulator:
             reaction_wheel = self.actuator_model.get("reaction_wheel")
             if reaction_wheel is not None:
                 reaction_wheel_torque = reaction_wheel.get_torque(
-                    self.actuator_model.get(
-                        "reaction_wheel_speeds", np.zeros(reaction_wheel.N_RWs)
-                    )
+                    self.actuator_model.get("reaction_wheel_speeds", np.zeros(3))
                 )
 
             magnetorquer = self.actuator_model.get("magnetorquer")
@@ -1354,12 +1378,12 @@ class Simulator:
         self._reset_sensor_records()
         self._reset_estimator_records()
         self.controller_next_update_time = 0.0
+        self._record_due_sensor_measurements(state, 0.0)
+        self._record_estimator_state(0.0)
         self._update_controller_command(state, 0.0, force=True)
         initial_torques = self._torque_snapshot(state, 0.0)
         for name, value in initial_torques.items():
             torque_history[name][0] = value
-        self._record_due_sensor_measurements(state, 0.0)
-        self._record_estimator_state(0.0)
 
         if show_progress:
             self._print_progress("Simulation", 0, num_steps, "steps")

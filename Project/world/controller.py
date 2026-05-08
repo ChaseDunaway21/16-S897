@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -111,249 +110,42 @@ def dare_gain_history(
     return riccati_gain(A, B, Q, R, P), P, gains
 
 
-# A lot of this storage class for the reference trajectory came from help with ChatGPT,
-# It is bulky, I should skim this down to just computing the reference trajectory, but
-# this makes plotting easier
-@dataclass
-class EigenSlewReference:
-    q0: np.ndarray
-    qf: np.ndarray
-    target_rate_body: np.ndarray
-    duration_s: float
-    inertia_tensor: np.ndarray
-    wheel_axes_body: np.ndarray
-    initial_wheel_momentum: np.ndarray
-    sample_dt_s: float
-    start_time_s: float = 0.0
-    sample_times_s: np.ndarray | None = None
-    wheel_momentum_history: np.ndarray | None = None
-    wheel_momentum_rate_history: np.ndarray | None = None
+def versine_profile(
+    elapsed_s: float, duration_s: float, final_angle: float
+) -> tuple[float, float, float]:
+    """Lecture 16 rest-to-rest angle profile."""
+    if elapsed_s < 0.0:
+        return 0.0, 0.0, 0.0
+    if elapsed_s > duration_s:
+        return final_angle, 0.0, 0.0
 
-    @classmethod
-    def build(
-        cls,
-        initial_attitude: np.ndarray,
-        target_attitude: np.ndarray,
-        target_rate_body: np.ndarray,
-        duration_s: float,
-        inertia_tensor: np.ndarray,
-        wheel_axes_body: np.ndarray,
-        initial_wheel_momentum: np.ndarray,
-        sample_dt_s: float,
-        start_time_s: float,
-    ) -> "EigenSlewReference":
-        # Renormalizing these helped with numerical issues
-        q0 = normalize_quaternion(initial_attitude)
-        qf = normalize_quaternion(target_attitude)
-
-        reference = cls(
-            q0,
-            qf,
-            np.asarray(target_rate_body, dtype=float).reshape(3),
-            duration_s,
-            np.asarray(inertia_tensor, dtype=float).reshape(3, 3),
-            np.asarray(wheel_axes_body, dtype=float),
-            np.asarray(initial_wheel_momentum, dtype=float).reshape(
-                np.asarray(wheel_axes_body, dtype=float).shape[1]
-            ),
-            max(float(sample_dt_s), 1e-6),
-            start_time_s,
-        )
-        reference._precompute_inverse_dynamics()
-        return reference
-
-    @property
-    def initial_rho_body(self) -> np.ndarray:
-        return self.wheel_axes_body @ self.initial_wheel_momentum
-
-    def _rotation_axis(self) -> tuple[np.ndarray, float]:
-        Q = quaternion_to_rotation_matrix(self.q0)
-        Q_desired = quaternion_to_rotation_matrix(self.qf)
-
-        # Lecture 16 eigenaxis: use Q_desired.T Q and take the eigenvector
-        # corresponding to the eigenvalue 1
-        relative_rotation = Q_desired.T @ Q
-        eigenvalues, eigenvectors = np.linalg.eig(relative_rotation)
-        axis = np.real(eigenvectors[:, np.argmin(np.abs(eigenvalues - 1.0))])
-        axis_norm = np.linalg.norm(axis)
-        if axis_norm < 1e-12:
-            return np.zeros(3), 0.0
-        axis = axis / axis_norm
-
-        # The eigenvector sign is arbitrary. Pick the sign that matches the
-        # right-multiplied body-frame slew qf = q0 * q_delta
-        q_delta_command = short_quaternion(
-            quaternion_multiply(quaternion_conjugate(self.q0), self.qf)
-        )
-        rotation_vector = rotation_vector_from_quaternion(q_delta_command)
-        if np.dot(axis, rotation_vector) < 0.0:
-            axis = -axis
-
-        angle = float(np.linalg.norm(rotation_vector))
-        if angle < 1e-12:
-            return np.zeros(3), 0.0
-        return axis, angle
-
-    def _versine(self, elapsed_s: float, angle: float) -> tuple[float, float, float]:
-        if elapsed_s < 0.0:
-            return 0.0, 0.0, 0.0
-        if elapsed_s > self.duration_s:
-            return angle, 0.0, 0.0
-
-        # Lecture 16 eigen-slew: theta(t) = theta_f/2 * (1 - cos(alpha t)),
-        # with alpha = pi / T so theta_dot is zero at both endpoints
-        alpha = np.pi / max(self.duration_s, 1e-9)
-        alpha_t = alpha * float(elapsed_s)
-        theta = 0.5 * angle * (1.0 - np.cos(alpha_t))
-        theta_dot = 0.5 * angle * alpha * np.sin(alpha_t)
-        theta_ddot = 0.5 * angle * alpha**2 * np.cos(alpha_t)
-        return theta, theta_dot, theta_ddot
-
-    def _kinematics_at(
-        self, elapsed_s: float
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        axis_body, angle = self._rotation_axis()
-        if angle < 1e-12:
-            return self.qf.copy(), self.target_rate_body.copy(), np.zeros(3)
-
-        theta, theta_dot, theta_ddot = self._versine(elapsed_s, angle)
-
-        # Right-multiply by the body-frame eigenaxis rotation so q_ref traces
-        # q0 -> qf while keeping the commanded rate in body coordinates
-        q_ref = quaternion_multiply(
-            self.q0, quaternion_from_rotation_vector(axis_body * theta)
-        )
-
-        # Reference rate and accleration
-        omega_ref = axis_body * theta_dot
-        omega_dot_ref = axis_body * theta_ddot
-
-        if elapsed_s > self.duration_s:
-            # After the slew, track the requested final body rate
-            omega_ref = self.target_rate_body.copy()
-            omega_dot_ref = np.zeros(3)
-
-        return q_ref, omega_ref, omega_dot_ref
-
-    def _rho_dot_body(self, elapsed_s: float, rho_body: np.ndarray) -> np.ndarray:
-        _, omega_ref, omega_dot_ref = self._kinematics_at(elapsed_s)
-        # Lecture 16 inverse dynamics for wheels
-        # J omega_dot + rho_dot + omega x (J omega + rho) = 0
-        return -self.inertia_tensor @ omega_dot_ref - skew_symmetric(omega_ref) @ (
-            self.inertia_tensor @ omega_ref + rho_body
-        )
-
-    def _rk4_rho_step(
-        self, elapsed_s: float, rho_body: np.ndarray, dt: float
-    ) -> np.ndarray:  # TODO: Should I make a shared one with dynamics.py?
-        k1 = self._rho_dot_body(elapsed_s, rho_body)
-        k2 = self._rho_dot_body(elapsed_s + 0.5 * dt, rho_body + 0.5 * dt * k1)
-        k3 = self._rho_dot_body(elapsed_s + 0.5 * dt, rho_body + 0.5 * dt * k2)
-        k4 = self._rho_dot_body(elapsed_s + dt, rho_body + dt * k3)
-        return rho_body + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-
-    def _precompute_inverse_dynamics(self) -> None:
-        """
-        Inverse dynamics precomputation from lecture 16.
-        """
-        # The total number of steps is based on the slew duration and the LQR dt
-        n_steps = max(1, int(np.ceil(self.duration_s / self.sample_dt_s)))
-        self.sample_times_s = np.linspace(0.0, self.duration_s, n_steps + 1)
-        rho_history = np.zeros((n_steps + 1, 3), dtype=float)
-        rho_dot_history = np.zeros((n_steps + 1, 3), dtype=float)
-        rho_history[0] = self.initial_rho_body
-
-        # From the notes:
-        # Start with rho(0), solve p_dot(t), integrate to get rho(t)
-        for i in range(n_steps):
-            t0 = self.sample_times_s[i]
-            t1 = self.sample_times_s[i + 1]
-            rho_dot_history[i] = self._rho_dot_body(t0, rho_history[i])
-            rho_history[i + 1] = self._rk4_rho_step(t0, rho_history[i], t1 - t0)
-
-        rho_dot_history[-1] = np.zeros(3)
-
-        #
-        self.wheel_momentum_history = (
-            np.linalg.pinv(self.wheel_axes_body) @ rho_history.T
-        ).T
-        self.wheel_momentum_rate_history = (
-            np.linalg.pinv(self.wheel_axes_body) @ rho_dot_history.T
-        ).T
-
-    def at(self, elapsed_s: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        return self._kinematics_at(elapsed_s)
-
-    def wheel_momentum_at(self, elapsed_s: float) -> tuple[np.ndarray, np.ndarray]:
-        if (
-            self.sample_times_s is None
-            or self.wheel_momentum_history is None
-            or self.wheel_momentum_rate_history is None
-        ):
-            self._precompute_inverse_dynamics()
-
-        if elapsed_s < 0.0:
-            return self.wheel_momentum_history[0].copy(), np.zeros_like(
-                self.initial_wheel_momentum
-            )
-        if elapsed_s == 0.0:
-            return (
-                self.wheel_momentum_history[0].copy(),
-                self.wheel_momentum_rate_history[0].copy(),
-            )
-        if elapsed_s >= self.duration_s:
-            return self.wheel_momentum_history[-1].copy(), np.zeros_like(
-                self.initial_wheel_momentum
-            )
-
-        wheel_momentum = np.array(
-            [
-                np.interp(elapsed_s, self.sample_times_s, component)
-                for component in self.wheel_momentum_history.T
-            ],
-            dtype=float,
-        )
-        wheel_momentum_rate = np.array(
-            [
-                np.interp(elapsed_s, self.sample_times_s, component)
-                for component in self.wheel_momentum_rate_history.T
-            ],
-            dtype=float,
-        )
-        return wheel_momentum, wheel_momentum_rate
+    alpha = np.pi / max(duration_s, 1e-9)
+    alpha_t = alpha * float(elapsed_s)
+    theta = 0.5 * final_angle * (1.0 - np.cos(alpha_t))
+    theta_dot = 0.5 * final_angle * alpha * np.sin(alpha_t)
+    theta_ddot = 0.5 * final_angle * alpha**2 * np.cos(alpha_t)
+    return theta, theta_dot, theta_ddot
 
 
-@dataclass
-class FixedAttitudeReference:
-    q_ref: np.ndarray
-    target_rate_body: np.ndarray
-    wheel_momentum: np.ndarray
-    start_time_s: float = 0.0
+def rk4_step(t: float, y: np.ndarray, dt: float, derivative) -> np.ndarray:
+    """
+    RK4 step to propogate rho. Using the RK4 from dynamics.py
+    does not work since that requires full simulation state input.
+    """
+    k1 = derivative(t, y)
+    k2 = derivative(t + 0.5 * dt, y + 0.5 * dt * k1)
+    k3 = derivative(t + 0.5 * dt, y + 0.5 * dt * k2)
+    k4 = derivative(t + dt, y + dt * k3)
+    return y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
-    @classmethod
-    def build(
-        cls,
-        target_attitude: np.ndarray,
-        target_rate_body: np.ndarray,
-        wheel_momentum: np.ndarray,
-        start_time_s: float,
-    ) -> "FixedAttitudeReference":
-        # Fixed-target mode skips trajectory tracking and regulates directly to
-        # the requested endpoint attitude/rate
-        return cls(
-            normalize_quaternion(target_attitude),
-            np.asarray(target_rate_body, dtype=float).reshape(3),
-            np.asarray(wheel_momentum, dtype=float).reshape(-1),
-            start_time_s,
-        )
 
-    def at(self, elapsed_s: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        _ = elapsed_s
-        return self.q_ref.copy(), self.target_rate_body.copy(), np.zeros(3)
-
-    def wheel_momentum_at(self, elapsed_s: float) -> tuple[np.ndarray, np.ndarray]:
-        _ = elapsed_s
-        return self.wheel_momentum.copy(), np.zeros_like(self.wheel_momentum)
+def interpolate_rows(times: np.ndarray, values: np.ndarray, t: float) -> np.ndarray:
+    """Interpolate a vector-valued time history."""
+    if times.size == 1 or t <= times[0]:
+        return values[0]
+    if t >= times[-1]:
+        return values[-1]
+    return np.array([np.interp(t, times, values[:, i]) for i in range(values.shape[1])])
 
 
 class ReactionWheelTVLQRController:
@@ -362,7 +154,6 @@ class ReactionWheelTVLQRController:
     def __init__(
         self,
         target_attitude: np.ndarray,
-        n_reaction_wheels: int = 3,
         update_period_s: float = 0.0,
         inertia_tensor: np.ndarray | None = None,
         target_rate_body: np.ndarray | None = None,
@@ -392,44 +183,44 @@ class ReactionWheelTVLQRController:
         self.lqr_dt_s = max(float(lqr_dt_s), 1e-6)
         self.use_eigen_slew = bool(use_eigen_slew)
         self.wheel_axes_body = (
-            np.eye(3, int(n_reaction_wheels))
+            np.eye(3)
             if wheel_axes_body is None
             else np.asarray(wheel_axes_body, dtype=float)
         )
-        if self.wheel_axes_body.shape != (3, int(n_reaction_wheels)):
-            raise ValueError("wheel_axes_body must have shape (3, n_reaction_wheels)")
+        if self.wheel_axes_body.shape != (3, 3):
+            raise ValueError("wheel_axes_body must have shape (3, 3)")
         self.wheel_max_torque = float(wheel_max_torque)
         self.wheel_max_angular_momentum = float(wheel_max_angular_momentum)
-        self.n_reaction_wheels = int(n_reaction_wheels)
 
-        # LQR State[phi(3), delta_omega(3), delta_wheel_momentum(n)]
-        self.state_size = 6 + self.n_reaction_wheels
+        # LQR State[phi(3), delta_omega(3), delta_wheel_momentum(3)]
+        self.state_size = 9
 
         # Bryson-ish rule
         wheel_momentum_weight = 1.0 / self.wheel_max_angular_momentum**2
         self.Q = (
-            np.diag(
-                [400.0] * 3
-                + [10_000.0] * 3
-                + [wheel_momentum_weight] * self.n_reaction_wheels
-            )
+            np.diag([400.0] * 3 + [10_000.0] * 3 + [wheel_momentum_weight] * 3)
             if Q is None
             else matrix_from_config(Q, (self.state_size, self.state_size))
         )
         self.R = (
-            np.eye(self.n_reaction_wheels) / self.wheel_max_torque**2
+            np.eye(3) / self.wheel_max_torque**2
             if R is None
-            else matrix_from_config(R, (self.n_reaction_wheels, self.n_reaction_wheels))
+            else matrix_from_config(R, (3, 3))
         )
-        self.reference: EigenSlewReference | FixedAttitudeReference | None = None
-        self.reference_times_s = np.zeros(1)
-        self.reference_gains = np.zeros((1, self.n_reaction_wheels, self.state_size))
-        self.reference_wheel_momentum = np.zeros(self.n_reaction_wheels)
         (
             self.K_nominal,
             self.P_nominal,
             self.K_nominal_history,
         ) = self._nominal_gain_history(nominal_gain_steps)
+        self.reference_start_s = 0.0
+        self.reference_initialized = False
+        self.q0 = self.target_attitude
+        self.slew_axis_body = np.zeros(3)
+        self.slew_angle = 0.0
+        self.reference_times_s = np.zeros(1)
+        self.reference_wheel_momentum = np.zeros((1, 3))
+        self.reference_wheel_rate = np.zeros((1, 3))
+        self.reference_gains = self.K_nominal.reshape(1, 3, self.state_size)
 
     def _nominal_gain_history(
         self, steps: int
@@ -438,7 +229,7 @@ class ReactionWheelTVLQRController:
         A_c, B_c = gyrostat_linearization(
             self.target_rate_body,
             self.inertia_tensor,
-            np.zeros(self.n_reaction_wheels),
+            np.zeros(3),
             self.wheel_axes_body,
         )
 
@@ -449,76 +240,129 @@ class ReactionWheelTVLQRController:
     def initialize_reference(
         self, state: np.ndarray, state_index: dict, time_s: float
     ) -> None:
-        rho_body = np.asarray(state[state_index["RHO"]], dtype=float).reshape(3)
+        self.reference_start_s = float(time_s)
+        self.q0 = normalize_quaternion(state[state_index["ATTITUDE"]])
+        initial_wheel_momentum = self._wheel_momentum_coordinates(
+            state[state_index["RHO"]]
+        )
 
-        # Convert body gyrostat momentum into wheel-coordinate momentum so the
-        # LQR error state matches the linearization
-        self.reference_wheel_momentum = np.linalg.pinv(self.wheel_axes_body) @ rho_body
-
-        if self.use_eigen_slew:
-            # Freeze the current state as the start of the eigenaxis reference
-            self.reference = EigenSlewReference.build(
-                state[state_index["ATTITUDE"]],
-                self.target_attitude,
-                self.target_rate_body,
-                self.slew_duration_s,
-                self.inertia_tensor,
-                self.wheel_axes_body,
-                self.reference_wheel_momentum,
-                self.lqr_dt_s,
-                float(time_s),
-            )
-            self._compute_gain_schedule()
+        if not self.use_eigen_slew:
+            self.reference_times_s = np.zeros(1)
+            self.reference_wheel_momentum = initial_wheel_momentum.reshape(1, 3)
+            self.reference_wheel_rate = np.zeros((1, 3))
+            self.reference_gains = self.K_nominal.reshape(1, 3, self.state_size)
+            self.reference_initialized = True
             return
 
-        self.reference = FixedAttitudeReference.build(
-            self.target_attitude,
-            self.target_rate_body,
-            self.reference_wheel_momentum,
-            float(time_s),
+        self.slew_axis_body, self.slew_angle = self._eigen_axis_and_angle(
+            self.q0, self.target_attitude
         )
-        self._use_Kss()
+        self._make_eigen_slew_reference(initial_wheel_momentum)
+        self._compute_gain_schedule()
+        self.reference_initialized = True
 
-    def _use_Kss(self) -> None:
-        """Use nominal Kss for all time."""
-        self.reference_times_s = np.zeros(1)
-        self.reference_gains = self.K_nominal.reshape(
-            1, self.n_reaction_wheels, self.state_size
+    def _eigen_axis_and_angle(
+        self, q: np.ndarray, q_desired: np.ndarray
+    ) -> tuple[np.ndarray, float]:
+        Q = quaternion_to_rotation_matrix(q)
+        Q_desired = quaternion_to_rotation_matrix(q_desired)
+        relative_rotation = Q_desired.T @ Q
+        eigenvalues, eigenvectors = np.linalg.eig(relative_rotation)
+        axis = np.real(eigenvectors[:, np.argmin(np.abs(eigenvalues - 1.0))])
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm < 1e-12:
+            return np.zeros(3), 0.0
+        axis /= axis_norm
+
+        q_delta = short_quaternion(
+            quaternion_multiply(quaternion_conjugate(q), q_desired)
         )
+        rotation_vector = rotation_vector_from_quaternion(q_delta)
+        angle = float(np.linalg.norm(rotation_vector))
+        if angle < 1e-12:
+            return np.zeros(3), 0.0
+        if np.dot(axis, rotation_vector) < 0.0:
+            axis = -axis
+        return axis, angle
+
+    def _reference_kinematics(
+        self, elapsed_s: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if (not self.use_eigen_slew) or self.slew_angle < 1e-12:
+            return self.target_attitude, self.target_rate_body, np.zeros(3)
+        if elapsed_s > self.slew_duration_s:
+            return self.target_attitude, self.target_rate_body, np.zeros(3)
+
+        theta, theta_dot, theta_ddot = versine_profile(
+            elapsed_s, self.slew_duration_s, self.slew_angle
+        )
+        q_ref = quaternion_multiply(
+            self.q0, quaternion_from_rotation_vector(self.slew_axis_body * theta)
+        )
+        return q_ref, self.slew_axis_body * theta_dot, self.slew_axis_body * theta_ddot
+
+    def _reference_rho_dot(self, elapsed_s: float, rho_body: np.ndarray) -> np.ndarray:
+        _, omega_ref, omega_dot_ref = self._reference_kinematics(elapsed_s)
+        return -self.inertia_tensor @ omega_dot_ref - skew_symmetric(omega_ref) @ (
+            self.inertia_tensor @ omega_ref + rho_body
+        )
+
+    def _reference_wheel_rate(
+        self, elapsed_s: float, rho_body: np.ndarray
+    ) -> np.ndarray:
+        return self._wheel_momentum_coordinates(
+            self._reference_rho_dot(elapsed_s, rho_body)
+        )
+
+    def _make_eigen_slew_reference(self, initial_wheel_momentum: np.ndarray) -> None:
+        n_steps = max(1, int(np.ceil(self.slew_duration_s / self.lqr_dt_s)))
+        self.reference_times_s = np.linspace(0.0, self.slew_duration_s, n_steps + 1)
+        rho_history = np.zeros((n_steps + 1, 3))
+        rho_history[0] = self.wheel_axes_body @ initial_wheel_momentum
+        self.reference_wheel_momentum = np.zeros((n_steps + 1, 3))
+        self.reference_wheel_rate = np.zeros((n_steps + 1, 3))
+
+        for i in range(n_steps):
+            t0 = self.reference_times_s[i]
+            dt = self.reference_times_s[i + 1] - t0
+            self.reference_wheel_momentum[i] = self._wheel_momentum_coordinates(
+                rho_history[i]
+            )
+            self.reference_wheel_rate[i] = self._reference_wheel_rate(
+                t0, rho_history[i]
+            )
+            rho_history[i + 1] = rk4_step(
+                t0, rho_history[i], dt, self._reference_rho_dot
+            )
+
+        self.reference_wheel_momentum[-1] = self._wheel_momentum_coordinates(
+            rho_history[-1]
+        )
+        self.reference_wheel_rate[-1] = np.zeros(3)
 
     def _compute_gain_schedule(self) -> None:
         """Compute Ks along the reference trajectory."""
-
-        # Build a backward finite-horizon TVLQR schedule along the eigen-slew
-        n_steps = max(1, int(np.ceil(self.slew_duration_s / self.lqr_dt_s)))
-        self.reference_times_s = np.linspace(0.0, self.slew_duration_s, n_steps + 1)
-        self.reference_gains = np.zeros(
-            (n_steps + 1, self.n_reaction_wheels, self.state_size), dtype=float
-        )
+        n_steps = self.reference_times_s.size - 1
+        self.reference_gains = np.zeros((n_steps + 1, 3, self.state_size), dtype=float)
         P = self.P_nominal.copy()
 
         for i in range(n_steps):
-            # Backward pass: start at the terminal steady-state cost and walk
-            # toward the start of the reference trajectory
+            # Backward pass: start at the terminal state and go backwards
             A_d, B_d = self._reference_discrete_matrices(n_steps - 1 - i)
             K = riccati_gain(A_d, B_d, self.Q, self.R, P)
             self.reference_gains[n_steps - 1 - i] = K
             P = self.Q + A_d.T @ P @ A_d - A_d.T @ P @ B_d @ K
 
-        # At and beyond the terminal time, use the nominal infinite-horizon gain
+        # After the slew ends, use Kss
         self.reference_gains[-1] = self.K_nominal
 
     def _reference_discrete_matrices(self, index: int) -> tuple[np.ndarray, np.ndarray]:
-        assert self.reference is not None
         t0 = self.reference_times_s[index]
-
-        # Linearize around the reference angular velocity
-        _, omega0, _ = self.reference.at(t0)
-        wheel_momentum0, _ = self.reference.wheel_momentum_at(t0)
+        _, omega0, _ = self._reference_kinematics(t0)
         A_c, B_c = gyrostat_linearization(
             omega0,
             self.inertia_tensor,
-            wheel_momentum0,
+            self.reference_wheel_momentum[index],
             self.wheel_axes_body,
         )
         t1 = self.reference_times_s[index + 1]
@@ -527,10 +371,21 @@ class ReactionWheelTVLQRController:
 
     def _gain(self, elapsed_s: float) -> np.ndarray:
         """Use the gain along the reference trajectory"""
+        if self.reference_gains.shape[0] == 1:
+            return self.reference_gains[0]
         index = np.searchsorted(self.reference_times_s, elapsed_s, side="right") - 1
         return self.reference_gains[
             int(np.clip(index, 0, self.reference_gains.shape[0] - 1))
         ]
+
+    def _wheel_reference(self, elapsed_s: float) -> tuple[np.ndarray, np.ndarray]:
+        wheel_momentum = interpolate_rows(
+            self.reference_times_s, self.reference_wheel_momentum, elapsed_s
+        )
+        wheel_rate = interpolate_rows(
+            self.reference_times_s, self.reference_wheel_rate, elapsed_s
+        )
+        return wheel_momentum, wheel_rate
 
     def _body_torque_to_wheel_command(
         self, torque_body: np.ndarray, actuator_model: dict | None
@@ -545,16 +400,33 @@ class ReactionWheelTVLQRController:
             max_torque = wheel.max_torque
             max_momentum = wheel.max_angular_momentum
 
-        command = np.linalg.pinv(axes * (max_torque / max_momentum)) @ np.asarray(
-            torque_body
-        ).reshape(3)
+        command = np.linalg.solve(axes, np.asarray(torque_body).reshape(3))
+        command *= max_momentum / max_torque
         return np.clip(command, -max_momentum, max_momentum)
 
     def _wheel_momentum_coordinates(self, rho_body: np.ndarray) -> np.ndarray:
-        # Least-squares map from body gyrostat momentum to wheel-axis momenta
-        return np.linalg.pinv(self.wheel_axes_body) @ np.asarray(
-            rho_body, dtype=float
-        ).reshape(3)
+        return np.linalg.solve(self.wheel_axes_body, np.asarray(rho_body).reshape(3))
+
+    def _state_error(
+        self,
+        state: np.ndarray,
+        state_index: dict,
+        q_ref: np.ndarray,
+        omega_ref: np.ndarray,
+        wheel_momentum_ref: np.ndarray,
+    ) -> np.ndarray:
+        error = np.empty(self.state_size)
+        error[:3] = 0.5 * rotation_vector_from_quaternion(
+            quaternion_multiply(
+                quaternion_conjugate(q_ref), state[state_index["ATTITUDE"]]
+            )
+        )
+        error[3:6] = state[state_index["ATTITUDE_RATE"]] - omega_ref
+        error[6:] = (
+            self._wheel_momentum_coordinates(state[state_index["RHO"]])
+            - wheel_momentum_ref
+        )
+        return error
 
     def compute_command(
         self,
@@ -567,46 +439,21 @@ class ReactionWheelTVLQRController:
         actuator_model: dict | None = None,
         estimator_state: np.ndarray | None = None,
     ) -> np.ndarray:
-        _ = spacecraft, environment_model, estimator_state
-        if self.reference is None:
-            self.initialize_reference(state, state_index, time_s)
+        _ = spacecraft, environment_model
+        feedback_state = state if estimator_state is None else estimator_state
+        if not self.reference_initialized:
+            self.initialize_reference(feedback_state, state_index, time_s)
 
-        elapsed = float(time_s) - self.reference.start_time_s
-        q_ref, omega_ref, omega_dot_ref = self.reference.at(elapsed)
-        wheel_momentum_ref, _ = self.reference.wheel_momentum_at(elapsed)
-        wheel_momentum = self._wheel_momentum_coordinates(state[state_index["RHO"]])
-
-        # Reduced attitude error: q_err = q_ref^-1 * q, then phi ~= 0.5 log(q_err)
-        # to match the small-angle coordinates used by the LQR linearization
-        error = np.hstack(
-            [
-                0.5
-                * rotation_vector_from_quaternion(
-                    quaternion_multiply(
-                        quaternion_conjugate(q_ref),
-                        state[state_index["ATTITUDE"]],
-                    )
-                ),
-                state[state_index["ATTITUDE_RATE"]] - omega_ref,
-                wheel_momentum - wheel_momentum_ref,
-            ]
+        elapsed = float(time_s) - self.reference_start_s
+        q_ref, omega_ref, _ = self._reference_kinematics(elapsed)
+        wheel_momentum_ref, wheel_rate_ref = self._wheel_reference(elapsed)
+        delta_x = self._state_error(
+            feedback_state, state_index, q_ref, omega_ref, wheel_momentum_ref
         )
 
-        # tau_feedforward = J omega_dot_ref + omega_ref^ (J omega_ref + rho)
-        feedforward = self.inertia_tensor @ omega_dot_ref + skew_symmetric(
-            omega_ref
-        ) @ (
-            self.inertia_tensor @ omega_ref + self.wheel_axes_body @ wheel_momentum_ref
-        )
-
-        # tau_body = -B_w r_dot
-        wheel_momentum_rate = -np.linalg.pinv(self.wheel_axes_body) @ feedforward
-
-        # Apply u = - K @ delta x
-        wheel_momentum_rate -= self._gain(elapsed) @ error
-
-        # Map the commanded internal momentum rate back to body torque.
-        body_torque = -self.wheel_axes_body @ wheel_momentum_rate
+        # TVLQR update: u is wheel momentum rate.
+        u = wheel_rate_ref - self._gain(elapsed) @ delta_x
+        body_torque = -self.wheel_axes_body @ u
         return self._body_torque_to_wheel_command(body_torque, actuator_model)
 
     def save_gain_convergence_plot(self, path: str | Path) -> Path:
@@ -637,7 +484,7 @@ class ReactionWheelTVLQRController:
         ax.grid(True, alpha=0.35, linestyle="--", linewidth=0.7)
 
         state_labels = ["phi_x", "phi_y", "phi_z", "omega_x", "omega_y", "omega_z"] + [
-            f"r_{i + 1}" for i in range(self.n_reaction_wheels)
+            f"r_{i + 1}" for i in range(3)
         ]
         max_abs_gain = np.max(np.abs(self.K_nominal_history), axis=0)
         active_entries = np.argwhere(max_abs_gain > 1e-14)
