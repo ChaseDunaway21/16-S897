@@ -5,3 +5,4 @@ Project/kernels/
 .venv
 .ruff_cache
 *.png
+!IMU_Measurements/plots/*.png
