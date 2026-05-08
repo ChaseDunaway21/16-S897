@@ -1024,6 +1024,16 @@ class Simulator:
         if isinstance(sensor_properties, dict) and "seed" in sensor_properties:
             sensor_properties["seed"] = seed + trial_index
 
+        controller_properties = trial_cfg.get("controller_properties", {}) or {}
+        if isinstance(controller_properties, dict):
+            reaction_wheel_cfg = controller_properties.get("reaction_wheel_tvlqr")
+            if isinstance(reaction_wheel_cfg, dict):
+                # Monte Carlo workers should not create controller diagnostic
+                # plots. GUI Matplotlib backends can crash process-pool workers,
+                # and this plot is the same controller diagnostic repeated for
+                # every sampled trial.
+                reaction_wheel_cfg["plot_gain_convergence"] = False
+
         return trial_cfg
 
     def run_monte_carlo(

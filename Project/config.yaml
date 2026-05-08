@@ -1,7 +1,7 @@
 simulation_properties:
 
   - name: monte_carlo
-    value: False
+    value: True
     trials: 25
 
   - name: ideal # this only applies to non-monte carlo simulations, monte carlo will include deviations and perturbations
@@ -43,12 +43,12 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: [-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
+    value: random  #[-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
 
   - name: attitude_rate
     value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
     nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
-    deviation: [0.1, 0.1, 0.1] # rad/s
+    deviation: [0.2, 0.2, 0.2] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
 safe_mode_properties:
@@ -244,7 +244,7 @@ controller_properties:
     N_RWs: 3
     target_attitude: [1.0, 0.0, 0.0, 0.0] # [q0, q1, q2, q3]
     target_rate_body: [0.0, 0.0, 0.0] # rad/s
-    use_eigen_slew: False # True tracks an eigen-slew; False regulates directly to target_attitude
+    use_eigen_slew: True # True tracks an eigen-slew; False regulates directly to target_attitude
     slew_duration_s: 300.0
     lqr_dt_s: 0.1 # 10 Hz TVLQR/control discretization
     nominal_gain_steps: 54000

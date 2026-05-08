@@ -8,8 +8,6 @@ import argparse
 from pathlib import Path
 import yaml
 
-from simulator import Simulator
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the ARGUS simulation")
@@ -23,6 +21,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if not args.show:
+        import matplotlib
+
+        matplotlib.use("Agg")
+
+    from simulator import Simulator
+
     config_path = Path(__file__).with_name("config.yaml")
     with config_path.open("r", encoding="utf-8") as file:
         cfg = yaml.safe_load(file) or {}
