@@ -7,3 +7,4 @@ spiceypy
 ppigrf
 cyipopt
 pre-commit
+allantools

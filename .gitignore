@@ -1,5 +1,6 @@
 __pycache__
 Class_Material/
+IMU_Measurements/data/
 Project/kernels/
 .venv
 .ruff_cache
