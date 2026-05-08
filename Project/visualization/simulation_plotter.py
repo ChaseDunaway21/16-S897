@@ -148,10 +148,13 @@ def simulation_plot_paths(
             "attitude": root_dir / attitude_filename,
             "angular_velocity": root_dir / "simulation_angular_velocity.png",
             "rho": root_dir / "simulation_rho.png",
+            "target_attitude": root_dir / "simulation_target_attitude.png",
             "sun_safe_mode_axis": root_dir / "simulation_sun_safe_mode_axis.png",
             "sensors": root_dir / "simulation_sensors.png",
             "camera_measurements": root_dir / "simulation_camera_measurements.png",
             "estimator": root_dir / "simulation_estimator.png",
+            "environmental_torque": root_dir / "simulation_environmental_torque.png",
+            "gyro_mag_torque": root_dir / "simulation_gyro_mag_torques.png",
         }
 
     base_path = Path(save_path)
@@ -171,6 +174,15 @@ def simulation_plot_paths(
                 "estimator": base_path.with_name(
                     f"{base_path.stem}_estimator{base_path.suffix}"
                 ),
+                "target_attitude": base_path.with_name(
+                    f"{base_path.stem}_target_attitude{base_path.suffix}"
+                ),
+                "environmental_torque": base_path.with_name(
+                    f"{base_path.stem}_environmental_torque{base_path.suffix}"
+                ),
+                "gyro_mag_torque": base_path.with_name(
+                    f"{base_path.stem}_gyro_mag_torques{base_path.suffix}"
+                ),
             }
         return {
             "overview": base_path,
@@ -178,6 +190,9 @@ def simulation_plot_paths(
             "sensors": base_path / "simulation_sensors.png",
             "camera_measurements": base_path / "simulation_camera_measurements.png",
             "estimator": base_path / "simulation_estimator.png",
+            "target_attitude": base_path / "simulation_target_attitude.png",
+            "environmental_torque": base_path / "simulation_environmental_torque.png",
+            "gyro_mag_torque": base_path / "simulation_gyro_mag_torques.png",
         }
 
     if base_path.suffix:
@@ -190,10 +205,13 @@ def simulation_plot_paths(
             "attitude": root_dir / f"{prefix}_{Path(attitude_filename).stem}.png",
             "angular_velocity": root_dir / f"{prefix}_angular_velocity.png",
             "rho": root_dir / f"{prefix}_rho.png",
+            "target_attitude": root_dir / f"{prefix}_target_attitude.png",
             "sun_safe_mode_axis": root_dir / f"{prefix}_sun_safe_mode_axis.png",
             "sensors": root_dir / f"{prefix}_sensors.png",
             "camera_measurements": root_dir / f"{prefix}_camera_measurements.png",
             "estimator": root_dir / f"{prefix}_estimator.png",
+            "environmental_torque": root_dir / f"{prefix}_environmental_torque.png",
+            "gyro_mag_torque": root_dir / f"{prefix}_gyro_mag_torques.png",
         }
 
     return {
@@ -202,10 +220,13 @@ def simulation_plot_paths(
         "attitude": base_path / attitude_filename,
         "angular_velocity": base_path / "simulation_angular_velocity.png",
         "rho": base_path / "simulation_rho.png",
+        "target_attitude": base_path / "simulation_target_attitude.png",
         "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
         "sensors": base_path / "simulation_sensors.png",
         "camera_measurements": base_path / "simulation_camera_measurements.png",
         "estimator": base_path / "simulation_estimator.png",
+        "environmental_torque": base_path / "simulation_environmental_torque.png",
+        "gyro_mag_torque": base_path / "simulation_gyro_mag_torques.png",
     }
 
 
@@ -466,6 +487,132 @@ def plot_velocity_figure(times: np.ndarray, vel_kms: np.ndarray) -> plt.Figure:
     ax.set_xlabel("time [s]")
     ax.set_ylabel("velocity [km/s]")
     ax.legend(loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def accumulated_environmental_torque(
+    times: np.ndarray, environmental_torque_nm: np.ndarray
+) -> np.ndarray:
+    """Return cumulative environmental torque impulse in body coordinates [N m s]."""
+    times = np.asarray(times, dtype=float)
+    torque = np.asarray(environmental_torque_nm, dtype=float)
+    if times.size == 0 or torque.size == 0:
+        return np.empty((0, 3), dtype=float)
+
+    accumulated = np.zeros_like(torque, dtype=float)
+    if times.size > 1:
+        dt = np.diff(times)[:, np.newaxis]
+        accumulated[1:] = np.cumsum(0.5 * (torque[1:] + torque[:-1]) * dt, axis=0)
+    return accumulated
+
+
+def plot_environmental_torque_figure(
+    times: np.ndarray, environmental_torque_nm: np.ndarray
+) -> plt.Figure:
+    accumulated = accumulated_environmental_torque(times, environmental_torque_nm)
+    magnitude = np.linalg.norm(accumulated, axis=1)
+
+    fig, ax = plt.subplots(figsize=(12, 5), facecolor=FIGURE_FACE_COLOR)
+    style_time_axis(ax)
+    for i, (label, color) in enumerate(
+        [("Tx", "#2563eb"), ("Ty", "#f59e0b"), ("Tz", "#14b8a6")]
+    ):
+        ax.plot(times, accumulated[:, i], label=label, linewidth=1.8, color=color)
+    ax.plot(times, magnitude, label="|T|", linewidth=2.0, color="#0f172a")
+    ax.set_title("Accumulated Environmental Torque")
+    ax.set_xlabel("time [s]")
+    ax.set_ylabel("torque impulse [N m s]")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def plot_gyro_mag_torque_figure(
+    times: np.ndarray,
+    reaction_wheel_torque_nm: np.ndarray,
+    magnetorquer_torque_nm: np.ndarray,
+) -> plt.Figure:
+    fig, axes = plt.subplots(
+        2, 1, figsize=(12, 7), facecolor=FIGURE_FACE_COLOR, sharex=True
+    )
+    component_spec = [("Tx", "#2563eb"), ("Ty", "#f59e0b"), ("Tz", "#14b8a6")]
+    torque_sets = (
+        ("Reaction-Wheel / Gyro Torque", reaction_wheel_torque_nm),
+        ("Magnetorquer Torque", magnetorquer_torque_nm),
+    )
+
+    for ax, (title, torques) in zip(axes, torque_sets):
+        torques = np.asarray(torques, dtype=float)
+        style_time_axis(ax)
+        for i, (label, color) in enumerate(component_spec):
+            ax.plot(times, torques[:, i], label=label, linewidth=1.5, color=color)
+        ax.plot(
+            times,
+            np.linalg.norm(torques, axis=1),
+            label="|T|",
+            linewidth=1.8,
+            color="#0f172a",
+        )
+        ax.set_title(title)
+        ax.set_ylabel("torque [N m]")
+        ax.legend(loc="best", ncol=4, fontsize=8)
+
+    axes[-1].set_xlabel("time [s]")
+    fig.tight_layout()
+    return fig
+
+
+def plot_target_attitude_figure(
+    times: np.ndarray, attitudes: np.ndarray, target_attitude: np.ndarray
+) -> plt.Figure:
+    target = normalize_quaternion(target_attitude)
+    actual = np.asarray(
+        [normalize_quaternion(q) for q in np.asarray(attitudes, dtype=float)[:, 0:4]],
+        dtype=float,
+    )
+    signs = np.sign(actual @ target)
+    signs[signs == 0.0] = 1.0
+    actual_aligned = actual * signs[:, np.newaxis]
+    target_history = np.repeat(target[np.newaxis, :], actual.shape[0], axis=0)
+    attitude_error_deg = np.rad2deg(
+        2.0 * np.arccos(np.clip(np.abs(actual @ target), -1.0, 1.0))
+    )
+
+    fig, axes = plt.subplots(
+        2, 1, figsize=(12, 7), facecolor=FIGURE_FACE_COLOR, sharex=True
+    )
+    q_colors = ["#6d28d9", "#db2777", "#0ea5e9", "#16a34a"]
+    q_labels = ["q0", "q1", "q2", "q3"]
+
+    style_time_axis(axes[0])
+    for i, label in enumerate(q_labels):
+        axes[0].plot(
+            times,
+            actual_aligned[:, i],
+            color=q_colors[i],
+            linewidth=1.5,
+            label=f"actual {label}",
+        )
+        axes[0].plot(
+            times,
+            target_history[:, i],
+            color=q_colors[i],
+            linewidth=1.1,
+            linestyle="--",
+            alpha=0.75,
+            label=f"target {label}",
+        )
+    axes[0].set_title("Target Attitude Tracking")
+    axes[0].set_ylabel("quaternion [-]")
+    axes[0].legend(loc="upper right", ncol=4, fontsize=8)
+
+    style_time_axis(axes[1])
+    axes[1].plot(times, attitude_error_deg, color="#0f172a", linewidth=1.8)
+    axes[1].set_xlabel("time [s]")
+    axes[1].set_ylabel("angle error [deg]")
+    axes[1].set_title("Angular Error to Configured Target")
+
     fig.tight_layout()
     return fig
 
@@ -1215,6 +1362,42 @@ def plot_simulation(
     ):
         estimator_fig = plot_estimator_figure(ctx, times, att, estimator_history)
 
+    environmental_torque_fig = None
+    torque_history = result.get("torque_history_body_nm", {})
+    if isinstance(torque_history, Mapping) and "environmental" in torque_history:
+        environmental_torque = np.asarray(torque_history["environmental"], dtype=float)
+        if environmental_torque.shape == (times.size, 3):
+            environmental_torque_fig = plot_environmental_torque_figure(
+                times, environmental_torque
+            )
+
+    gyro_mag_torque_fig = None
+    if isinstance(torque_history, Mapping):
+        reaction_wheel_torque = np.asarray(
+            torque_history.get("reaction_wheel", np.zeros((times.size, 3))),
+            dtype=float,
+        )
+        magnetorquer_torque = np.asarray(
+            torque_history.get("magnetorquer", np.zeros((times.size, 3))),
+            dtype=float,
+        )
+        if reaction_wheel_torque.shape == (
+            times.size,
+            3,
+        ) and magnetorquer_torque.shape == (times.size, 3):
+            gyro_mag_torque_fig = plot_gyro_mag_torque_figure(
+                times, reaction_wheel_torque, magnetorquer_torque
+            )
+
+    target_attitude_fig = None
+    target_attitude = result.get("target_attitude")
+    if target_attitude is not None:
+        target_attitude_array = np.asarray(target_attitude, dtype=float)
+        if target_attitude_array.size == 4:
+            target_attitude_fig = plot_target_attitude_figure(
+                times, att, target_attitude_array
+            )
+
     if ctx.plot_layout == "together":
         fig = None
         if ctx.show_simulation_overview:
@@ -1252,6 +1435,27 @@ def plot_simulation(
                 plot_paths["estimator"],
                 "Estimator plot saved",
             )
+        if environmental_torque_fig is not None:
+            save_figure(
+                ctx.logger,
+                environmental_torque_fig,
+                plot_paths["environmental_torque"],
+                "Accumulated environmental torque plot saved",
+            )
+        if target_attitude_fig is not None:
+            save_figure(
+                ctx.logger,
+                target_attitude_fig,
+                plot_paths["target_attitude"],
+                "Target attitude tracking plot saved",
+            )
+        if gyro_mag_torque_fig is not None:
+            save_figure(
+                ctx.logger,
+                gyro_mag_torque_fig,
+                plot_paths["gyro_mag_torque"],
+                "Gyro and magnetorquer torque plot saved",
+            )
 
         if show:
             plt.show()
@@ -1264,6 +1468,9 @@ def plot_simulation(
                 or sensor_fig
                 or camera_measurement_fig
                 or estimator_fig
+                or environmental_torque_fig
+                or target_attitude_fig
+                or gyro_mag_torque_fig
                 or {}
             )
         )
@@ -1321,6 +1528,12 @@ def plot_simulation(
         figures["camera_measurements"] = camera_measurement_fig
     if estimator_fig is not None:
         figures["estimator"] = estimator_fig
+    if environmental_torque_fig is not None:
+        figures["environmental_torque"] = environmental_torque_fig
+    if target_attitude_fig is not None:
+        figures["target_attitude"] = target_attitude_fig
+    if gyro_mag_torque_fig is not None:
+        figures["gyro_mag_torque"] = gyro_mag_torque_fig
     if ctx.show_gyrostat_components:
         figures["rho"] = (
             plot_component_overlay(
@@ -1402,6 +1615,27 @@ def plot_simulation(
             figures["estimator"],
             plot_paths["estimator"],
             "Estimator plot saved",
+        )
+    if "environmental_torque" in figures:
+        save_figure(
+            ctx.logger,
+            figures["environmental_torque"],
+            plot_paths["environmental_torque"],
+            "Accumulated environmental torque plot saved",
+        )
+    if "target_attitude" in figures:
+        save_figure(
+            ctx.logger,
+            figures["target_attitude"],
+            plot_paths["target_attitude"],
+            "Target attitude tracking plot saved",
+        )
+    if "gyro_mag_torque" in figures:
+        save_figure(
+            ctx.logger,
+            figures["gyro_mag_torque"],
+            plot_paths["gyro_mag_torque"],
+            "Gyro and magnetorquer torque plot saved",
         )
 
     if show:

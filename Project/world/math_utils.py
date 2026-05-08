@@ -29,6 +29,14 @@ def covariance_matrix(covariance: np.ndarray | None, size: int = 3) -> np.ndarra
     return cov
 
 
+def matrix_from_config(value: object, shape: tuple[int, int]) -> np.ndarray:
+    """Return a diagonal matrix from input vector."""
+    matrix = np.asarray(value, dtype=float)
+    if matrix.ndim == 1:
+        matrix = np.diag(matrix)
+    return matrix.reshape(shape)
+
+
 def add_noise(
     value: np.ndarray, covariance: np.ndarray, rng: np.random.Generator
 ) -> np.ndarray:

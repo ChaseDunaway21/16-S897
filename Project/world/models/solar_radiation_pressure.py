@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from Project.world.math_utils import unit_vector
+from world.math_utils import unit_vector
 from world.models.constants import (
     ASTRONOMICAL_UNIT,
     SOLAR_CONSTANT_1_AU,

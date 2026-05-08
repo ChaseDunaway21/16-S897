@@ -18,7 +18,7 @@ from .wahbas_sensor_gen import (
     generate_wahba_sensor_sample,
 )
 from world.rotations_and_transformations import R_inertial_to_body
-from Project.world.math_utils import unit_vector
+from world.math_utils import unit_vector
 
 #################################################################################################
 # WAHBA SVD

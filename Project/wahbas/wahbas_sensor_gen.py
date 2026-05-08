@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from Project.world.math_utils import unit_vector
+from world.math_utils import unit_vector
 from world.models.sun import SunModel
 from world.sensors import Magnetometer, SunSensor, VisualCamera
 from world.spacecraft import Spacecraft

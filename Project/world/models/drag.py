@@ -25,7 +25,7 @@ from world.models.solar_radiation_pressure import projected_surface_areas
 from world.models.sun import SunModel
 from world.rotations_and_transformations import (
     R_body_to_inertial,
-    R_z,
+    rotate_around_z,
     geodetic_from_ecef,
 )
 
@@ -36,7 +36,7 @@ def density(
     """Return Harris-Priester atmospheric density [kg/m^3]."""
     position = np.asarray(position_eci_m, dtype=float).reshape(3)
     gmst = GMST_J2000 + EARTH_ROTATION_RATE * float(time_s)
-    position_ecef = R_z(-gmst) @ position
+    position_ecef = rotate_around_z(-gmst) @ position
     _, _, altitude_km = geodetic_from_ecef(position_ecef)
 
     if altitude_km < HP_ALTITUDES_KM[0] or altitude_km > HP_ALTITUDES_KM[-1]:

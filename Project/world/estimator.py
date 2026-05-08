@@ -5,13 +5,17 @@ https://github.com/cmu-argus-2/GNC-Simulation
 
 The state is [q_w, q_x, q_y, q_z, gyro_bias_x, gyro_bias_y, gyro_bias_z].
 The covariance is over the 6D error state [attitude_error, gyro_bias_error].
+
+References:
+[1] Markley, F. Landis. “Attitude Determination Using Two Vector Measurements.”
+    1999 Flight Mechanics Symposium, NASA Goddard Space Flight Center, May 1999.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from Project.world.math_utils import skew_symmetric, unit_rows, unit_vector
+from world.math_utils import skew_symmetric, unit_rows, unit_vector
 from world.rotations_and_transformations import attitude_jacobian as G
 from world.rotations_and_transformations import (
     H,
@@ -24,9 +28,17 @@ from world.rotations_and_transformations import (
     quaternion_from_rotation_vector,
 )
 
+#################################################################################################
+# PREDICTION AND UPDATE
+#################################################################################################
+
 
 def _direction_covariance(sigma: float, direction_eci: np.ndarray) -> np.ndarray:
-    """Return direction-vector covariance from an angular noise sigma."""
+    """
+    Return direction-vector covariance from an angular noise sigma.
+    This is from [1], it assumes Gaussian, isotropic noise orthogonal
+    to the measurement direction.
+    """
     direction_cross = skew_symmetric(unit_vector(direction_eci))
     return float(sigma) ** 2 * direction_cross @ direction_cross.T
 
@@ -96,7 +108,7 @@ class MEKF:
         """Propagate attitude and covariance using the measured gyro body rate."""
         gyro = np.asarray(gyro_measurement, dtype=float).reshape(3)
 
-        dt = (
+        dt = (  # This is for t = 0
             0.0
             if self.last_prediction_time is None
             else float(t) - self.last_prediction_time
@@ -107,7 +119,7 @@ class MEKF:
 
         q = self.get_attitude()
         omega = gyro - self.get_gyro_bias()
-        # quaternion_from_rotation_vector is expm but doesn't need scipy
+        # quaternion_from_rotation_vector is the same as exp(theta) = delta-q
         dq_body = quaternion_from_rotation_vector(omega * dt)
         q_next = normalize_quaternion(L(q) @ dq_body)
         self.set_attitude(q_next)

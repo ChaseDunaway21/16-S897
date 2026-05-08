@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from Project.world.math_utils import add_noise, covariance_matrix
+from world.math_utils import add_noise, covariance_matrix
 
 
 GYROSCOPE_MODEL = np.eye(3)

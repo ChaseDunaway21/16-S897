@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from Project.world.math_utils import skew_symmetric
+from world.math_utils import skew_symmetric
 from world.rotations_and_transformations import attitude_jacobian as G
 import world.models.gravity as gravity
 import world.models.drag as drag
@@ -237,7 +237,6 @@ def actuator_torque_body(
     actuator_model: dict | None = None,
 ) -> np.ndarray:
     """Return actuator torque applied to the spacecraft body [N m]."""
-    _ = state, state_index, current_time
     if not actuator_model:
         return np.zeros(3, dtype=float)
 
@@ -247,6 +246,21 @@ def actuator_torque_body(
         torque_body += reaction_wheel.get_torque(
             actuator_model.get("reaction_wheel_speeds", np.zeros(reaction_wheel.N_RWs))
         )
+
+    magnetorquer = actuator_model.get("magnetorquer")
+    if magnetorquer is not None:
+        magnetic_field_model = actuator_model.get("magnetic_field_model")
+        if magnetic_field_model is not None:
+            magnetic_field_eci = magnetic_field_model.field_eci(
+                state[state_index["POS_ECI"]], current_time
+            )
+            torque_body += magnetorquer.get_torque(
+                actuator_model.get(
+                    "magnetorquer_voltages", np.zeros(magnetorquer.N_MTBs)
+                ),
+                state[state_index["ATTITUDE"]],
+                magnetic_field_eci,
+            )
 
     return torque_body
 

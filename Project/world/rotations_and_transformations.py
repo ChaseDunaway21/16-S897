@@ -16,9 +16,8 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.linalg import expm
-import spiceypy as spice
 
-from Project.world.math_utils import skew_symmetric
+from world.math_utils import skew_symmetric
 from world.models.constants import RADIUS_EARTH, WGS84_FLATTENING
 
 # These are helper matrices directly from the Notes
@@ -33,7 +32,7 @@ T = np.block(
 )
 
 
-def R_z(angle: float) -> np.ndarray:
+def rotate_around_z(angle: float) -> np.ndarray:
     """Rotation matrix around the z-axis"""
     c = np.cos(angle)
     s = np.sin(angle)
@@ -62,14 +61,30 @@ def enu_to_ecef(vector_enu: np.ndarray, lon_rad: float, lat_rad: float) -> np.nd
 
 def geodetic_from_ecef(position_ecef_m: np.ndarray) -> tuple[float, float, float]:
     """Convert geodetic coordinates to ECEF."""
+    import spiceypy as spice
+
     lon, lat, alt = spice.recgeo(
         np.asarray(position_ecef_m, dtype=float), RADIUS_EARTH, WGS84_FLATTENING
     )
     return np.rad2deg(lon), np.rad2deg(lat), alt / 1000.0
 
 
+def R_body_to_inertial(q: np.ndarray) -> np.ndarray:
+    """Convert a body-frame vector to inertial frame using the quaternion."""
+    return quaternion_to_rotation_matrix(q)
+
+
+def R_inertial_to_body(q: np.ndarray) -> np.ndarray:
+    """Convert an inertial-frame vector to body frame using the quaternion."""
+    return quaternion_to_rotation_matrix(q).T
+
+
+def inertial_to_body(q: np.ndarray, vector_eci: np.ndarray) -> np.ndarray:
+    return R_inertial_to_body(q) @ np.asarray(vector_eci, dtype=float)
+
+
 def rotation_vector_exponential(rotation_vector: np.ndarray) -> np.ndarray:
-    """Compute exp(v_hat) for a rotation vector."""
+    """Compute exp(v_hat) for a rotation vector returns a rotation matrix."""
     return expm(skew_symmetric(rotation_vector))
 
 
@@ -95,7 +110,8 @@ def attitude_jacobian(q: np.ndarray) -> np.ndarray:
 
 
 def L(q: np.ndarray) -> np.ndarray:
-    """Return L(q) matrix for quaternion multiplication.
+    """
+    Return L(q) matrix for quaternion multiplication.
     This is directly from the notes.
     """
     s = q[0]
@@ -127,24 +143,80 @@ def R(q: np.ndarray) -> np.ndarray:
     )
 
 
+def E(q: np.ndarray) -> np.ndarray:
+    """
+    E(q): This is in lecture 17. The dynamics A takes in a quaternion and
+    outputs a quaternion. So this attitude quaternion maps the error angle to a
+    quaternion, then takes the output quaternion of A and maps it back to an error angle
+    using the attitude Jacobian and leaves the rest of the state alone.
+    i.e. delta-x_k+1 = E(q_{k+1}).T A E(q_k) delta-x_k
+    """
+    return np.block(
+        [
+            [attitude_jacobian(q), np.zeros((4, 3))],
+            [np.zeros((3, 3)), np.eye(3)],
+        ]
+    )
+
+
 def normalize_quaternion(q: np.ndarray) -> np.ndarray:
     """Return a unit quaternion in [w, x, y, z] order."""
     q = np.asarray(q, dtype=float).reshape(4)
     return q / np.linalg.norm(q)
 
 
+def quaternion_conjugate(q: np.ndarray) -> np.ndarray:
+    """Return the conjugate of one [w, x, y, z] quaternion."""
+    q = normalize_quaternion(q)
+    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=float)
+
+
+def quaternion_multiply(q_left: np.ndarray, q_right: np.ndarray) -> np.ndarray:
+    """
+    Return the Hamilton product of two [w, x, y, z] quaternions.
+    This is given in the early lectures 2-3.
+    """
+    q_left = normalize_quaternion(q_left)
+    q_right = normalize_quaternion(q_right)
+    s_left, v_left = q_left[0], q_left[1:4]
+    s_right, v_right = q_right[0], q_right[1:4]
+    return normalize_quaternion(
+        np.hstack(
+            [
+                s_left * s_right - np.dot(v_left, v_right),
+                s_left * v_right + s_right * v_left + np.cross(v_left, v_right),
+            ]
+        )
+    )
+
+
+def short_quaternion(q: np.ndarray) -> np.ndarray:
+    """Return the smaller of the two equivalent quaternions."""
+    q = normalize_quaternion(q)
+    return -q if q[0] < 0.0 else q
+
+
 def quaternion_from_rotation_vector(
     rotation_vector: np.ndarray,
-) -> np.ndarray:  # TODO this simplifies the expm, I may swap it out
-    """Convert a rotation vector into a unit quaternion using axis-angle [3]."""
+) -> np.ndarray:
+    """Convert an SO(3) rotation vector into a unit quaternion i.e. q = expq(phi)."""
     rotation_vector = np.asarray(rotation_vector, dtype=float).reshape(3)
-    angle = np.linalg.norm(rotation_vector)
-    if angle < 1e-12:
-        return normalize_quaternion(np.hstack([1.0, 0.5 * rotation_vector]))
+    half_angle = 0.5 * np.linalg.norm(rotation_vector)
+    return normalize_quaternion(
+        np.hstack(
+            [
+                np.cos(half_angle),
+                0.5 * np.sinc(half_angle / np.pi) * rotation_vector,
+            ]
+        )
+    )
 
-    axis = rotation_vector / angle
-    half_angle = 0.5 * angle
-    return np.hstack([np.cos(half_angle), np.sin(half_angle) * axis])
+
+def rotation_vector_from_quaternion(q: np.ndarray) -> np.ndarray:
+    """Reverse of quaternion_from_rotation_vector, i.e. phi = logq(q)."""
+    q = short_quaternion(q)
+    half_angle = np.arctan2(np.linalg.norm(q[1:4]), q[0])
+    return 2.0 * q[1:4] / np.sinc(half_angle / np.pi)
 
 
 def quaternion_from_rotation_matrix(rotation_matrix: np.ndarray) -> np.ndarray:
@@ -253,17 +325,3 @@ def quaternion_to_euler(q: np.ndarray) -> np.ndarray:
     pitch = np.arcsin(s)
     yaw = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2))
     return np.array([roll, pitch, yaw])
-
-
-def R_body_to_inertial(q: np.ndarray) -> np.ndarray:
-    """Convert a body-frame vector to inertial frame using the quaternion."""
-    return quaternion_to_rotation_matrix(q)
-
-
-def R_inertial_to_body(q: np.ndarray) -> np.ndarray:
-    """Convert an inertial-frame vector to body frame using the quaternion."""
-    return quaternion_to_rotation_matrix(q).T
-
-
-def inertial_to_body(q: np.ndarray, vector_eci: np.ndarray) -> np.ndarray:
-    return R_inertial_to_body(q) @ np.asarray(vector_eci, dtype=float)

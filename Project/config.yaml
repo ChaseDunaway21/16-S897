@@ -43,10 +43,10 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: safe_mode # a specified quaternion, safe_mode, or random
+    value: [-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
 
   - name: attitude_rate
-    value: [-0.1, -0.1, 0.5] # rad/s (10 rpm), This applies to non-montecarlo runs
+    value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
     nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
     deviation: [0.1, 0.1, 0.1] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
@@ -54,7 +54,7 @@ initial_conditions:
 safe_mode_properties:
 
   - name: enabled
-    value: True # set False to disable safe-mode attitude initialization and gyrostat rho
+    value: False # set False to disable safe-mode attitude initialization and gyrostat rho
 
   - name: sun_direction_eci
     value: [1.0, 0.0, 0.0] # unit vector in ECI
@@ -220,6 +220,41 @@ environment_properties:
   drag_coefficient: 2.2
   coefficient_reflectivity: 1.2
   reference_area_m2: 0.01
+
+actuator_properties:
+  enabled: True
+
+  reaction_wheel:
+    enabled: True
+    N_RWs: 3
+    max_torque: 23e-6 # N m, Astrofein RW1 Type A = 23e-6, RW25 = 2e-3
+    max_angular_momentum: 5.8e-4 # N m s, Astrofein RW1 Type A = 5.8e-4, RW25 = 30e-3
+    G_RW_b:
+      - [1.0, 0.0, 0.0]
+      - [0.0, 1.0, 0.0]
+      - [0.0, 0.0, 1.0]
+    wheel_speeds: [0.0, 0.0, 0.0]
+
+controller_properties:
+  enabled: True
+  type: reaction_wheel_tvlqr # reaction_wheel_tvlqr or magnetorquer_only
+  update_rate_hz: 0.0 # <= 0 updates every integration step
+
+  reaction_wheel_tvlqr:
+    N_RWs: 3
+    target_attitude: [1.0, 0.0, 0.0, 0.0] # [q0, q1, q2, q3]
+    target_rate_body: [0.0, 0.0, 0.0] # rad/s
+    use_eigen_slew: False # True tracks an eigen-slew; False regulates directly to target_attitude
+    slew_duration_s: 300.0
+    lqr_dt_s: 0.1 # 10 Hz TVLQR/control discretization
+    nominal_gain_steps: 54000
+    plot_gain_convergence: True
+    Q_diagonal: [400.0, 400.0, 400.0, 10000.0, 10000.0, 10000.0, 1.7e3, 1.7e3, 1.7e3]
+    R_diagonal: [1.889e9, 1.889e9, 1.889e9]
+
+  magnetorquer_only:
+    N_MTBs: 6
+    voltages_command: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 sensor_properties:
   enabled: True

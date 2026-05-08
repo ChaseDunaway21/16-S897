@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from Project.world.math_utils import add_noise, covariance_matrix, unit_vector
+from world.math_utils import add_noise, covariance_matrix, unit_vector
 from world.models.sun import SunModel
 from world.rotations_and_transformations import inertial_to_body
 

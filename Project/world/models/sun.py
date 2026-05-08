@@ -24,7 +24,7 @@ from world.models.constants import (
     SOLAR_CONSTANT_1_AU,
     SPEED_OF_LIGHT,
 )
-from Project.world.math_utils import unit_vector
+from world.math_utils import unit_vector
 from world.rotations_and_transformations import R_body_to_inertial
 
 

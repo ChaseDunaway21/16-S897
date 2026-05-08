@@ -23,11 +23,16 @@ from visualization import (
 from world.controller import MagnetorquerOnlyController, ReactionWheelTVLQRController
 from world.estimator import MEKF
 from world.models.constants import MU_EARTH
-from world.dynamics import environmental_acceleration, integrate_dynamics
+from world.dynamics import (
+    environmental_acceleration,
+    environmental_torque_body,
+    integrate_dynamics,
+)
 import world.models.gravity as gravity
+from world.models.magnetic_field import MagneticFieldModel
 from world.models.solar_radiation_pressure import projected_area
 from world.models.sun import SunModel
-from world.actuators import ReactionWheel
+from world.actuators import Magnetorquer, ReactionWheel
 from world.sensors import (
     Accelerometer,
     Gyroscope,
@@ -471,9 +476,44 @@ class Simulator:
                 dtype=float,
             ).reshape(n_reaction_wheels)
 
+        magnetorquer_cfg = self._section_value(actuator_cfg, "magnetorquer", {}) or {}
+        if isinstance(magnetorquer_cfg, dict) and self._config_bool(
+            magnetorquer_cfg.get("enabled"), False
+        ):
+            n_magnetorquers = int(magnetorquer_cfg.get("N_MTBs", 6))
+            actuator_model["magnetorquer"] = Magnetorquer(
+                N_MTBs=n_magnetorquers,
+                resistance=magnetorquer_cfg.get("resistance", 3.25e-7),
+                A_cross=float(magnetorquer_cfg.get("A_cross", 5.432e-3)),
+                N_turns=int(magnetorquer_cfg.get("N_turns", 64)),
+                max_voltage=float(magnetorquer_cfg.get("max_voltage", 5.0)),
+                max_current_rating=float(
+                    magnetorquer_cfg.get("max_current_rating", 1.0)
+                ),
+                max_power=float(magnetorquer_cfg.get("max_power", 1.0)),
+                G_MTB_b=np.asarray(
+                    magnetorquer_cfg.get(
+                        "G_MTB_b",
+                        [
+                            [1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, -1.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0, 0.0, 1.0, -1.0],
+                        ],
+                    ),
+                    dtype=float,
+                ),
+            )
+            actuator_model["magnetorquer_voltages"] = np.asarray(
+                magnetorquer_cfg.get("voltages", np.zeros(n_magnetorquers)),
+                dtype=float,
+            ).reshape(n_magnetorquers)
+            actuator_model["magnetic_field_model"] = MagneticFieldModel()
+
         enabled_names = []
         if "reaction_wheel" in actuator_model:
             enabled_names.append("reaction_wheel")
+        if "magnetorquer" in actuator_model:
+            enabled_names.append("magnetorquer")
         enabled_actuators = ", ".join(enabled_names) if enabled_names else "none"
         self.logger.info("Enabled actuators: %s", enabled_actuators)
         return actuator_model or None
@@ -507,20 +547,62 @@ class Simulator:
             reaction_wheel_cfg = (
                 self._section_value(controller_cfg, "reaction_wheel_tvlqr", {}) or {}
             )
+            reaction_wheel = (
+                None
+                if self.actuator_model is None
+                else self.actuator_model.get("reaction_wheel")
+            )
             n_reaction_wheels = int(
                 reaction_wheel_cfg.get(
                     "N_RWs",
                     self._reaction_wheel_count(default=3),
                 )
             )
-            controller = ReactionWheelTVLQRController(
-                n_reaction_wheels=n_reaction_wheels,
-                wheel_speeds_command=reaction_wheel_cfg.get(
-                    "wheel_speeds_command",
-                    np.zeros(n_reaction_wheels),
-                ),
-                update_period_s=update_period_s,
+            wheel_axes_body = None if reaction_wheel is None else reaction_wheel.G_RW_b
+            wheel_max_torque = (
+                23e-6 if reaction_wheel is None else reaction_wheel.max_torque
             )
+            wheel_max_angular_momentum = (
+                5.8e-4
+                if reaction_wheel is None
+                else reaction_wheel.max_angular_momentum
+            )
+            target_attitude = reaction_wheel_cfg.get("target_attitude")
+            if target_attitude is None:
+                raise ValueError(
+                    "controller_properties.reaction_wheel_tvlqr.target_attitude must be set"
+                )
+            controller = ReactionWheelTVLQRController(
+                target_attitude=target_attitude,
+                n_reaction_wheels=n_reaction_wheels,
+                update_period_s=update_period_s,
+                inertia_tensor=self.spacecraft.inertia_tensor,
+                target_rate_body=reaction_wheel_cfg.get("target_rate_body"),
+                slew_duration_s=float(reaction_wheel_cfg.get("slew_duration_s", 60.0)),
+                lqr_dt_s=float(reaction_wheel_cfg.get("lqr_dt_s", self.dt)),
+                Q=reaction_wheel_cfg.get("Q", reaction_wheel_cfg.get("Q_diagonal")),
+                R=reaction_wheel_cfg.get("R", reaction_wheel_cfg.get("R_diagonal")),
+                wheel_axes_body=wheel_axes_body,
+                wheel_max_torque=wheel_max_torque,
+                wheel_max_angular_momentum=wheel_max_angular_momentum,
+                nominal_gain_steps=int(
+                    reaction_wheel_cfg.get("nominal_gain_steps", 54_000)
+                ),
+                use_eigen_slew=self._config_bool(
+                    reaction_wheel_cfg.get("use_eigen_slew"), True
+                ),
+            )
+            self.logger.info(
+                "TVLQR reference mode: %s",
+                "eigen_slew" if controller.use_eigen_slew else "fixed_target",
+            )
+            if self._config_bool(reaction_wheel_cfg.get("plot_gain_convergence"), True):
+                gain_plot = controller.save_gain_convergence_plot(
+                    self.output_dir / "tvlqr_gain_convergence.png"
+                )
+                self.logger.info(
+                    "TVLQR nominal gain convergence plot saved: %s", gain_plot
+                )
         elif controller_type in {"magnetorquer", "magnetorquer_only"}:
             magnetorquer_cfg = (
                 self._section_value(controller_cfg, "magnetorquer_only", {}) or {}
@@ -1107,6 +1189,77 @@ class Simulator:
             "  rho [kg m^2/s]: %s", self._vector_to_string(state[self.idx["RHO"]])
         )
 
+    def _torque_snapshot(
+        self, state: np.ndarray, time_s: float
+    ) -> dict[str, np.ndarray]:
+        """Return environmental and actuator torque components in body coordinates."""
+        environmental_torque = environmental_torque_body(
+            state, self.idx, time_s, self.environment_model
+        )
+        reaction_wheel_torque = np.zeros(3, dtype=float)
+        magnetorquer_torque = np.zeros(3, dtype=float)
+
+        if self.actuator_model:
+            reaction_wheel = self.actuator_model.get("reaction_wheel")
+            if reaction_wheel is not None:
+                reaction_wheel_torque = reaction_wheel.get_torque(
+                    self.actuator_model.get(
+                        "reaction_wheel_speeds", np.zeros(reaction_wheel.N_RWs)
+                    )
+                )
+
+            magnetorquer = self.actuator_model.get("magnetorquer")
+            if magnetorquer is not None:
+                magnetic_field_model = self.actuator_model.get("magnetic_field_model")
+                if magnetic_field_model is None:
+                    magnetic_field_model = MagneticFieldModel()
+                    self.actuator_model["magnetic_field_model"] = magnetic_field_model
+                magnetic_field_eci = magnetic_field_model.field_eci(
+                    state[self.idx["POS_ECI"]], time_s
+                )
+                magnetorquer_torque = magnetorquer.get_torque(
+                    self.actuator_model.get(
+                        "magnetorquer_voltages", np.zeros(magnetorquer.N_MTBs)
+                    ),
+                    state[self.idx["ATTITUDE"]],
+                    magnetic_field_eci,
+                )
+
+        return {
+            "environmental": environmental_torque,
+            "reaction_wheel": reaction_wheel_torque,
+            "magnetorquer": magnetorquer_torque,
+        }
+
+    def _log_torque_summary(
+        self, times: np.ndarray, torque_history: dict[str, np.ndarray]
+    ) -> None:
+        """Log maximum actuator torque and accumulated environmental torque."""
+        for key, label in (
+            ("reaction_wheel", "reaction-wheel"),
+            ("magnetorquer", "magnetorquer"),
+        ):
+            torques = torque_history[key]
+            magnitudes = np.linalg.norm(torques, axis=1)
+            max_index = int(np.argmax(magnitudes)) if magnitudes.size else 0
+            self.logger.info(
+                "Maximum %s torque generated: %.6e N m at t=%.2f s | vector=%s N m",
+                label,
+                float(magnitudes[max_index]) if magnitudes.size else 0.0,
+                float(times[max_index]) if times.size else 0.0,
+                self._vector_to_string(
+                    torques[max_index] if torques.size else np.zeros(3)
+                ),
+            )
+
+        env_torques = torque_history["environmental"]
+        accumulated_env = np.trapezoid(env_torques, times, axis=0)
+        self.logger.info(
+            "Accumulated environmental torque impulse over simulation: %s N m s | magnitude=%.6e N m s",
+            self._vector_to_string(accumulated_env),
+            float(np.linalg.norm(accumulated_env)),
+        )
+
     @staticmethod
     def _progress_fraction(current: int, total: int) -> float:
         if total <= 0:
@@ -1183,10 +1336,18 @@ class Simulator:
         times = np.zeros(num_steps + 1, dtype=float)
         history = np.zeros((num_steps + 1, state.size), dtype=float)
         history[0] = state
+        torque_history = {
+            "environmental": np.zeros((num_steps + 1, 3), dtype=float),
+            "reaction_wheel": np.zeros((num_steps + 1, 3), dtype=float),
+            "magnetorquer": np.zeros((num_steps + 1, 3), dtype=float),
+        }
         self._reset_sensor_records()
         self._reset_estimator_records()
         self.controller_next_update_time = 0.0
         self._update_controller_command(state, 0.0, force=True)
+        initial_torques = self._torque_snapshot(state, 0.0)
+        for name, value in initial_torques.items():
+            torque_history[name][0] = value
         self._record_due_sensor_measurements(state, 0.0)
         self._record_estimator_state(0.0)
 
@@ -1207,6 +1368,9 @@ class Simulator:
             t += self.dt
             times[k] = t
             history[k] = state
+            torques = self._torque_snapshot(state, t)
+            for name, value in torques.items():
+                torque_history[name][k] = value
             if self._record_due_sensor_measurements(state, t):
                 self._record_estimator_state(t)
 
@@ -1231,6 +1395,7 @@ class Simulator:
         self.spacecraft.set_state(updated_state)
 
         self.logger.info("Simulation complete")
+        self._log_torque_summary(times, torque_history)
         self._log_state_components(
             "Final state",
             updated_state,
@@ -1248,6 +1413,12 @@ class Simulator:
         return {
             "times_s": times,
             "state_history_si": history,
+            "torque_history_body_nm": torque_history,
+            "target_attitude": (
+                None
+                if not isinstance(self.controller, ReactionWheelTVLQRController)
+                else self.controller.target_attitude.copy()
+            ),
             "orbit_period_s": orbit_period,
             "sim_duration_s": sim_duration,
             "num_steps": num_steps,
