@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from world.math_utils import add_noise, covariance_matrix, unit_vector
+from world.math_utils import add_bearing_noise, unit_vector
 from world.models.sun import SunModel
 from world.rotations_and_transformations import inertial_to_body
 
@@ -30,13 +30,13 @@ class SunSensor:
     def __init__(
         self,
         sun_model: SunModel | None = None,
-        covariance: np.ndarray | None = None,
+        sigma_angle_deg: float = 0.0,
         bias: np.ndarray | None = None,
         rng: np.random.Generator | None = None,
         return_none_if_eclipsed: bool = True,
     ) -> None:
         self.sun_model = sun_model or SunModel()
-        self.covariance = covariance_matrix(covariance)
+        self.sigma_angle_rad = np.deg2rad(float(sigma_angle_deg))
         self.bias = (
             np.zeros(3, dtype=float)
             if bias is None
@@ -66,4 +66,4 @@ class SunSensor:
         clean = self.clean_measurement(state, state_index, time_s)
         if clean is None:
             return None
-        return add_noise(clean, self.covariance, self.rng)
+        return add_bearing_noise(clean, self.sigma_angle_rad, self.rng)

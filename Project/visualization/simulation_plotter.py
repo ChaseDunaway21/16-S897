@@ -969,6 +969,25 @@ def plot_estimator_figure(
     bias_estimates = est_states[:, 4:7]
     bias_bounds = 3.0 * sigmas[:, 3:6]
     bias_truth = configured_gyro_bias(ctx)
+    bias_truth_history = np.asarray(
+        estimator_history.get("gyro_bias_truth", []), dtype=float
+    )
+    if (
+        bias_truth_history.ndim == 2
+        and bias_truth_history.shape == bias_estimates.shape
+        and np.isfinite(bias_truth_history).all()
+    ):
+        bias_plot_values = bias_estimates - bias_truth_history
+        bias_plot_title = "Gyroscope Bias Error with 3-Sigma Bounds"
+        bias_plot_ylabel = "bias error [rad/s]"
+    elif bias_truth is not None:
+        bias_plot_values = bias_estimates - bias_truth.reshape(1, 3)
+        bias_plot_title = "Gyroscope Bias Error with 3-Sigma Bounds"
+        bias_plot_ylabel = "bias error [rad/s]"
+    else:
+        bias_plot_values = bias_estimates
+        bias_plot_title = "Gyroscope Bias Estimate with 3-Sigma Bounds"
+        bias_plot_ylabel = "bias [rad/s]"
 
     fig, axes = plt.subplots(
         3, 1, figsize=(13, 11), facecolor=FIGURE_FACE_COLOR, sharex=True
@@ -1057,10 +1076,12 @@ def plot_estimator_figure(
         )
         axes[2].plot(
             est_times,
-            bias_estimates[:, i],
+            bias_plot_values[:, i],
             color=color,
             linewidth=1.4,
-            label=f"bias {label}",
+            label=f"bias error {label}"
+            if "Error" in bias_plot_title
+            else f"bias {label}",
         )
         axes[2].plot(
             est_times,
@@ -1078,7 +1099,7 @@ def plot_estimator_figure(
             linestyle="--",
             alpha=0.45,
         )
-        if bias_truth is not None:
+        if bias_truth is not None and "Estimate" in bias_plot_title:
             axes[2].axhline(
                 bias_truth[i],
                 color=color,
@@ -1086,9 +1107,9 @@ def plot_estimator_figure(
                 linestyle=":",
                 alpha=0.85,
             )
-    axes[2].set_title("Gyroscope Bias Estimate with 3-Sigma Bounds")
+    axes[2].set_title(bias_plot_title)
     axes[2].set_xlabel("time [s]")
-    axes[2].set_ylabel("bias [rad/s]")
+    axes[2].set_ylabel(bias_plot_ylabel)
     axes[2].legend(loc="upper right", ncol=3, fontsize=8)
 
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.965))

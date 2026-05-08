@@ -23,6 +23,8 @@ def scalar_value(value: float) -> float:
 
 
 def covariance_matrix(covariance: np.ndarray | None, size: int = 3) -> np.ndarray:
+    if covariance is None:
+        return np.zeros((size, size), dtype=float)
     cov = np.asarray(covariance, dtype=float)
     if cov.ndim == 0:
         return float(cov) * np.eye(size)
@@ -43,6 +45,27 @@ def add_noise(
     return np.asarray(value, dtype=float) + rng.multivariate_normal(
         np.zeros(covariance.shape[0]), covariance
     )
+
+
+def bearing_covariance(
+    bearing: np.ndarray,
+    sigma_angle_rad: float,
+) -> np.ndarray:
+    """Return sigma^2 (I - b b.T) for a unit bearing vector."""
+    b = unit_vector(bearing)
+    return float(sigma_angle_rad) ** 2 * (np.eye(3) - np.outer(b, b))
+
+
+def add_bearing_noise(
+    bearing: np.ndarray,
+    sigma_angle_rad: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample bearing noise in the tangent plane and renormalize."""
+    b = unit_vector(bearing)
+    noise_covariance = bearing_covariance(b, sigma_angle_rad)
+    noisy = b + rng.multivariate_normal(np.zeros(3), noise_covariance)
+    return unit_vector(noisy)
 
 
 def skew_symmetric(v: np.ndarray) -> np.ndarray:

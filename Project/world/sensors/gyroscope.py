@@ -40,7 +40,7 @@ class Gyroscope:
         self.bias_random_walk_sigma = (
             np.zeros(3, dtype=float)
             if bias_random_walk_sigma is None
-            else np.asarray(bias_random_walk_sigma, dtype=float)
+            else np.abs(np.asarray(bias_random_walk_sigma, dtype=float))
         )
         self.rng = rng or np.random.default_rng()
         self.last_bias_update_time = None

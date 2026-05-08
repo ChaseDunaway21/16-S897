@@ -215,6 +215,12 @@ class MEKF:
         """Return a copy of the 7D nominal MEKF state."""
         return self.state_vector.copy()
 
+    def get_smoothed_state(self) -> np.ndarray:
+        """
+        Return a smoothed
+
+        """
+
     def set_state(self, state: np.ndarray) -> None:
         """Set the nominal quaternion and gyro-bias state."""
         state = np.asarray(state, dtype=float).reshape(7)

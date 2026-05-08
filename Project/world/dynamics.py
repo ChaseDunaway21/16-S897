@@ -244,7 +244,7 @@ def actuator_torque_body(
     reaction_wheel = actuator_model.get("reaction_wheel")
     if reaction_wheel is not None:
         torque_body += reaction_wheel.get_torque(
-            actuator_model.get("reaction_wheel_speeds", np.zeros(reaction_wheel.N_RWs))
+            actuator_model.get("reaction_wheel_speeds", np.zeros(3))
         )
 
     magnetorquer = actuator_model.get("magnetorquer")
