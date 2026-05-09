@@ -2,6 +2,11 @@ __pycache__
 Class_Material/
 IMU_Measurements/data/
 Project/kernels/
+Project/Report/*
+!Project/Report/*.pdf
+!Project/Report/*.tex
+!Project/Report/*.png
+!Project/Report/*.bib
 .venv
 .ruff_cache
 *.png

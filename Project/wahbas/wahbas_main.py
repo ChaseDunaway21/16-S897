@@ -17,7 +17,7 @@ from .wahbas_sensor_gen import (
     generate_wahba_monte_carlo_samples,
     generate_wahba_sensor_sample,
 )
-from world.rotations_and_transformations import R_inertial_to_body
+from world.rotations_and_transformations import R_body_to_inertial
 from world.math_utils import unit_rows
 
 #################################################################################################
@@ -48,18 +48,18 @@ def wahba_svd(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
     #    = min_Q Tr[(Q-B.T)^T (Q-B.T)]
     #    = min_Q Tr[Q.T Q - 2 Q.T B.T + B B.T] <- Q.TQ and BB.T are constants that don't change min Q
     #    = min_Q -2 Tr[Q.T B.T] <- the constant 2 doesn't change, take out the negative to make it a max!
-    #    = max_Q Tr[Q.T B]
+    #    = max_Q Tr[B Q]
     # 3. Replace Q with the SVD of B:
     #    B = U S V.T
-    #    max Q Tr[Q.T B] = max Q Tr[Q.T U S V.T] = max Q <U.T Q V, S>_F <- Frobenius norm
+    #    max Q Tr[B Q] = max Q Tr[U S V.T Q] = max Q <V.T Q U, S>_F <- Frobenius norm
     #        V.T and U have to be orthogonal, so the best solution is to make Q = I
     #    Thus,
-    #    Q = U V.T
+    #    Q = V U.T
 
     B = wahba_B(body_vectors, reference_vectors)
     U, _, Vt = np.linalg.svd(B)
-    M = np.diag([1.0, 1.0, np.linalg.det(U @ Vt)])
-    return U @ M @ Vt
+    M = np.diag([1.0, 1.0, np.linalg.det(Vt.T @ U.T)])
+    return Vt.T @ M @ U.T
 
 
 #################################################################################################
@@ -77,10 +77,16 @@ def wahba_sdp(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
     Q = cp.Variable((3, 3))
     I3 = np.eye(3)
     problem = cp.Problem(
-        cp.Maximize(cp.trace(B.T @ Q)),
+        cp.Maximize(cp.trace(B @ Q)),
         [cp.bmat([[I3, Q.T], [Q, I3]]) >> 0],
     )
-    problem.solve(solver="CLARABEL")
+    problem.solve(
+        solver="CLARABEL",
+        tol_gap_abs=1e-10,
+        tol_gap_rel=1e-10,
+        tol_feas=1e-10,
+        max_iter=1000,
+    )
     U, _, Vt = np.linalg.svd(np.asarray(Q.value, dtype=float))
     M = np.diag([1.0, 1.0, np.linalg.det(U @ Vt)])
     return U @ M @ Vt
@@ -97,7 +103,7 @@ def wahba_value(  # This is used for debugging.
     reference_vectors: np.ndarray,
 ) -> float:
     B = wahba_B(body_vectors, reference_vectors)
-    return float(np.trace(R_est.T @ B))
+    return float(np.trace(B @ R_est))
 
 
 def rotation_error_deg(R_est: np.ndarray, R_true: np.ndarray) -> float:
@@ -111,7 +117,7 @@ def solve_wahba_sample(sample: dict[str, object]) -> dict[str, object]:
     reference_vectors = sample["reference_vectors_eci"]
     R_svd = wahba_svd(body_vectors, reference_vectors)
     R_sdp = wahba_sdp(body_vectors, reference_vectors)
-    R_true = R_inertial_to_body(sample["attitude_true"])
+    R_true = R_body_to_inertial(sample["attitude_true"])
     return {
         "sensor_names": sample["sensor_names"],
         "body_vectors": body_vectors,
