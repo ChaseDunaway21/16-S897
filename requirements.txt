@@ -8,3 +8,4 @@ ppigrf
 cyipopt
 pre-commit
 allantools
+cvxpy

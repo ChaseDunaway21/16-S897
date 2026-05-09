@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import cyipopt as ipopt
+import cvxpy as cp
 
 from .wahbas_plotting import plot_wahba_attitude_trials, plot_wahba_monte_carlo
 from .wahbas_sensor_gen import (
@@ -18,18 +18,24 @@ from .wahbas_sensor_gen import (
     generate_wahba_sensor_sample,
 )
 from world.rotations_and_transformations import R_inertial_to_body
-from world.math_utils import unit_vector
+from world.math_utils import unit_rows
 
 #################################################################################################
 # WAHBA SVD
 #################################################################################################
 
 
+def wahba_B(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.ndarray:
+    unit_body_vectors = unit_rows(body_vectors)
+    unit_reference_vectors = unit_rows(reference_vectors)
+    return unit_body_vectors.T @ unit_reference_vectors
+
+
 def wahba_svd(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.ndarray:
     # https://youtu.be/PhAwy3dEYBk?si=b_kLH5RPCbRHVhf3
     # This is discussed in class, but here is a summary:
     # "What if the bearing vectors are not linearly independent of each other?"
-    # 1. B = sum(w_i * b_i * r_i^T) w = weight, b = body vector, r = reference vector
+    # 1. B = sum(b_i * r_i^T) where b = body vector and r = reference vector
     #    The goal is to find min_Q || Q-B.T ||^2_F (Frobenius norm)
     #    The trick is the Frobenius norm, which can be written as a Trace:
     #        <A,B>_F = Tr(A.T B) = vec(A).T vec(B) <- Inner product of column vectorized matrices
@@ -42,18 +48,15 @@ def wahba_svd(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
     #    = min_Q Tr[(Q-B.T)^T (Q-B.T)]
     #    = min_Q Tr[Q.T Q - 2 Q.T B.T + B B.T] <- Q.TQ and BB.T are constants that don't change min Q
     #    = min_Q -2 Tr[Q.T B.T] <- the constant 2 doesn't change, take out the negative to make it a max!
-    #    = max_Q Tr[Q B]
+    #    = max_Q Tr[Q.T B]
     # 3. Replace Q with the SVD of B:
     #    B = U S V.T
-    #    max Q Tr[Q B] = max Q Tr[Q U S V.T] = max Q <V Q.T U, S>_F <- Frobenius norm
+    #    max Q Tr[Q.T B] = max Q Tr[Q.T U S V.T] = max Q <U.T Q V, S>_F <- Frobenius norm
     #        V.T and U have to be orthogonal, so the best solution is to make Q = I
     #    Thus,
     #    Q = U V.T
 
-    unit_body_vectors = unit_vector(body_vectors)
-    unit_reference_vectors = unit_vector(reference_vectors)
-
-    B = unit_body_vectors.T @ unit_reference_vectors
+    B = wahba_B(body_vectors, reference_vectors)
     U, _, Vt = np.linalg.svd(B)
     M = np.diag([1.0, 1.0, np.linalg.det(U @ Vt)])
     return U @ M @ Vt
@@ -62,83 +65,25 @@ def wahba_svd(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
 #################################################################################################
 # WAHBA SDP
 #################################################################################################
-class WahbaIpoptProblem:
-    def __init__(self, B: np.ndarray) -> None:
-        self.B = B
-
-    def objective(self, Q: np.ndarray) -> float:
-        return -np.trace(Q.reshape(3, 3) @ self.B)
-
-    def gradient(self, Q: np.ndarray) -> np.ndarray:
-        return -self.B.T.reshape(-1)
-
-    def constraints(self, Q: np.ndarray) -> np.ndarray:
-        Q = Q.reshape(3, 3)
-        return np.hstack(
-            [
-                (Q.T @ Q - np.eye(3)).flatten(),
-                np.linalg.det(Q) - 1.0,
-            ]
-        )
-
-    def jacobian(self, Q: np.ndarray) -> np.ndarray:
-        Q = Q.reshape(3, 3)
-        J = np.zeros((10, 9), dtype=float)
-
-        # Constraint 1: Q.T Q = I
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    J[i * 3 + j, k * 3 + j] += Q[k, i]  # d/dQ[k,j] of Q.T Q[i,j]
-                    J[i * 3 + j, k * 3 + i] += Q[k, j]  # d/dQ[k,i] of Q.T Q[i,j]
-
-        # Constraint 2: det(Q) = 1
-        cof = (
-            np.linalg.det(Q) * np.linalg.inv(Q).T
-        )  # The derivative of a determinant is just the cofactor
-        J[9, :] = cof.flatten()
-
-        return J.flatten()
-
-
 def wahba_sdp(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.ndarray:
-    # https://youtu.be/PhAwy3dEYBk?si=b_kLH5RPCbRHVhf3
-    # The optimization problem is the same as the SVD solution, but we add a constraint that Q is a valid rotation matrix
-    #    max_Q Tr[Q B]
-    #    s.t.
-    #       I - Q.T Q = 0
-    #       det(Q) = 1
+    # This is similar in form, but now solving a SDP with the
+    # contraints that Q is orthogonal (i.e. Q.T Q = I) and has determinant 1.
+    # However, both of these conditions are nonconvex. Instead Q.T Q = I can
+    # be relaxed to an inequality, written as a block matrix using schur complement:
+    # [I, Q.T]
+    # [Q, I  ] >> 0
 
-    B = body_vectors.T @ reference_vectors
-
-    # Optimization settings
-    n = 9  # 3x3 rotation matrix
-    m = 10  # 9 constraints for orthogonality, 1 constraint for determinant
-
-    # Bounds
-    lb = -np.inf * np.ones(n)  # No upper bound
-    ub = np.inf * np.ones(n)  # No lower bound
-    cl = np.zeros(m)  # Constraints lower bound is 0
-    cu = np.zeros(m)  # Constraints upper bound is 0
-
-    # Guess
-    x0 = wahba_svd(body_vectors, reference_vectors).flatten()
-
-    solver = ipopt.Problem(
-        n=n,
-        m=m,
-        problem_obj=WahbaIpoptProblem(B),
-        lb=lb,
-        ub=ub,
-        cl=cl,
-        cu=cu,
+    B = wahba_B(body_vectors, reference_vectors)
+    Q = cp.Variable((3, 3))
+    I3 = np.eye(3)
+    problem = cp.Problem(
+        cp.Maximize(cp.trace(B.T @ Q)),
+        [cp.bmat([[I3, Q.T], [Q, I3]]) >> 0],
     )
-    solver.add_option("print_level", 0)
-    solver.add_option("tol", 1e-10)
-
-    x_opt, info = solver.solve(x0)
-
-    return x_opt.reshape(3, 3)
+    problem.solve(solver="CLARABEL")
+    U, _, Vt = np.linalg.svd(np.asarray(Q.value, dtype=float))
+    M = np.diag([1.0, 1.0, np.linalg.det(U @ Vt)])
+    return U @ M @ Vt
 
 
 #################################################################################################
@@ -146,10 +91,12 @@ def wahba_sdp(body_vectors: np.ndarray, reference_vectors: np.ndarray) -> np.nda
 #################################################################################################
 
 
-def wahba_value(
-    R_est: np.ndarray, body_vectors: np.ndarray, reference_vectors: np.ndarray
+def wahba_value(  # This is used for debugging.
+    R_est: np.ndarray,
+    body_vectors: np.ndarray,
+    reference_vectors: np.ndarray,
 ) -> float:
-    B = body_vectors.T @ reference_vectors
+    B = wahba_B(body_vectors, reference_vectors)
     return float(np.trace(R_est.T @ B))
 
 

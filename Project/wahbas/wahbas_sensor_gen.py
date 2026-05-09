@@ -8,8 +8,9 @@ from typing import Any
 import numpy as np
 import yaml
 
-from world.math_utils import unit_vector
+from world.math_utils import add_bearing_noise, add_noise, unit_vector
 from world.models.sun import SunModel
+from world.rotations_and_transformations import inertial_to_body
 from world.sensors import Magnetometer, SunSensor, VisualCamera
 from world.spacecraft import Spacecraft
 
@@ -51,20 +52,17 @@ def enabled_wahba_sensors(  # Only the vector sensors can be used, so all but th
     if config_bool(sun_sensor_cfg.get("enabled"), True):
         sensors["sun_sensor"] = SunSensor(
             sun_model=SunModel(kernel_paths=sun_sensor_cfg.get("kernel_paths", [])),
-            covariance=sun_sensor_cfg.get("covariance"),
+            sigma_angle_deg=float(sun_sensor_cfg.get("sigma_angle_deg", 0.0)),
             bias=sun_sensor_cfg.get("bias"),
             rng=rng,
-            return_none_if_eclipsed=config_bool(
-                sun_sensor_cfg.get("return_none_if_eclipsed"),
-                True,
-            ),
+            return_none_if_eclipsed=False,
         )
 
     # Is camera enabled
     camera_cfg = sensor_cfg.get("visual_camera", {}) or {}
     if config_bool(camera_cfg.get("enabled"), True):
         sensors["visual_camera"] = VisualCamera(
-            covariance=camera_cfg.get("covariance"),
+            sigma_angle_deg=float(camera_cfg.get("sigma_angle_deg", 0.0)),
             bias=camera_cfg.get("bias"),
             rng=rng,
         )
@@ -102,14 +100,31 @@ def sensor_measurement(
     targets: dict[str, np.ndarray],
     time_s: float,
 ) -> np.ndarray | None:
+    reference_eci = reference_vector_eci(
+        sensor_name, sensor, state, idx, targets, time_s
+    )
+    q = state[idx["ATTITUDE"]]
     if sensor_name == "visual_camera":
-        return sensor.get_measurement(
-            state,
-            idx,
-            time_s,
-            target_position_eci=targets["visual_camera"],
+        return add_bearing_noise(
+            unit_vector(inertial_to_body(q, reference_eci)) + sensor.bias,
+            sensor.sigma_angle_rad,
+            sensor.rng,
         )
-    return sensor.get_measurement(state, idx, time_s)
+    if sensor_name == "sun_sensor":
+        return add_bearing_noise(
+            unit_vector(inertial_to_body(q, reference_eci)) + sensor.bias,
+            sensor.sigma_angle_rad,
+            sensor.rng,
+        )
+    if sensor_name == "magnetometer":
+        position = state[idx["POS_ECI"]]
+        field_eci = sensor.magnetic_field_model.field_eci(position, time_s)
+        return add_noise(
+            inertial_to_body(q, field_eci) + sensor.bias,
+            sensor.covariance,
+            sensor.rng,
+        )
+    return None
 
 
 def generate_wahba_sensor_sample(
@@ -127,7 +142,10 @@ def generate_wahba_sensor_sample(
     sensors, targets = enabled_wahba_sensors(cfg, spacecraft, rng)
     if not sensors:
         raise ValueError("No enabled Wahba-capable sensors found")
+    if len(sensors) < 2:
+        raise ValueError("At least two Wahba-capable sensors must be enabled")
 
+    required_vectors = min(max(2, int(min_vectors)), len(sensors))
     idx = spacecraft.Idx["X"]
     base_state = spacecraft.get_state().astype(float, copy=True)
 
@@ -151,7 +169,7 @@ def generate_wahba_sensor_sample(
                 reference_vector_eci(sensor_name, sensor, state, idx, targets, time_s)
             )
 
-        if len(body_vectors) >= min_vectors:
+        if len(body_vectors) >= required_vectors:
             return {
                 "sensor_names": names,
                 "body_vectors": np.asarray(body_vectors, dtype=float),
@@ -159,7 +177,11 @@ def generate_wahba_sensor_sample(
                 "attitude_true": q_true,
             }
 
-    raise RuntimeError("Could not collect enough valid bearing vectors")
+    enabled_names = ", ".join(sensors.keys())
+    raise RuntimeError(
+        f"Could not collect {required_vectors} valid bearing vectors "
+        f"from enabled Wahba sensors: {enabled_names}"
+    )
 
 
 def generate_wahba_monte_carlo_samples(

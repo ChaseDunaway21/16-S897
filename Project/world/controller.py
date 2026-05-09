@@ -344,7 +344,7 @@ class ReactionWheelTVLQRController:
         """Compute Ks along the reference trajectory."""
         n_steps = self.reference_times_s.size - 1
         self.reference_gains = np.zeros((n_steps + 1, 3, self.state_size), dtype=float)
-        P = self.P_nominal.copy()
+        P = self.Q.copy()  # S_N = Q_N
 
         for i in range(n_steps):
             # Backward pass: start at the terminal state and go backwards
