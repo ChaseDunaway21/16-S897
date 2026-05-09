@@ -183,9 +183,19 @@ def environmental_torque_body(
     current_time: float,
     environment_model: dict | None = None,
 ) -> np.ndarray:
-    """Return non-gravitational external torque about the COM in body coordinates [N m]."""
+    """Return external environmental torque about the COM in body coordinates [N m]."""
     if not environment_model:
         return np.zeros(3, dtype=float)
+
+    position = state[state_index["POS_ECI"]]
+    velocity = state[state_index["VEL_ECI"]]
+    q = state[state_index["ATTITUDE"]]
+
+    torque_body = np.zeros(3, dtype=float)
+    if environment_model.get("use_gravity_gradient", False):
+        torque_body += gravity.gravity_gradient_torque_body(
+            position, q, environment_model["inertia_tensor"]
+        )
 
     surface_areas_m2 = environment_model.get("surface_areas_m2")
     surface_normals_body = environment_model.get("surface_normals_body")
@@ -195,13 +205,8 @@ def environmental_torque_body(
         or surface_normals_body is None
         or surface_centers_body is None
     ):
-        return np.zeros(3, dtype=float)
+        return torque_body
 
-    position = state[state_index["POS_ECI"]]
-    velocity = state[state_index["VEL_ECI"]]
-    q = state[state_index["ATTITUDE"]]
-
-    torque_body = np.zeros(3, dtype=float)
     if environment_model.get("use_drag", False):
         torque_body += drag.drag_torque_body(
             position,
@@ -244,7 +249,7 @@ def actuator_torque_body(
     reaction_wheel = actuator_model.get("reaction_wheel")
     if reaction_wheel is not None:
         torque_body += reaction_wheel.get_torque(
-            actuator_model.get("reaction_wheel_speeds", np.zeros(3))
+            actuator_model.get("reaction_wheel_speeds", np.zeros(reaction_wheel.N_RWs))
         )
 
     magnetorquer = actuator_model.get("magnetorquer")

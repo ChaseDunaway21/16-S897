@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 from world.models.constants import MU_EARTH, J2, RADIUS_EARTH
+from world.rotations_and_transformations import R_body_to_inertial, inertial_to_body
 
 
 def j2_acceleration(position: np.ndarray) -> np.ndarray:  # Eq 10.85 [1]
@@ -64,3 +65,15 @@ def j2_perturbation(position: np.ndarray) -> np.ndarray:  # Eq 10.103a [1]
     )
 
     return perturbation
+
+
+def gravity_gradient_torque_body(
+    position_eci: np.ndarray, q: np.ndarray, inertia_tensor: np.ndarray
+) -> np.ndarray:
+    """Lecture 13 gravity-gradient torque [N m]."""
+    r_eci = np.asarray(position_eci, dtype=float).reshape(3)
+    r = np.linalg.norm(r_eci)
+    R_body_to_eci = R_body_to_inertial(q)
+    J_eci = R_body_to_eci @ np.asarray(inertia_tensor, dtype=float) @ R_body_to_eci.T
+    torque_eci = 3.0 * MU_EARTH / r**5 * np.cross(r_eci, J_eci @ r_eci)
+    return inertial_to_body(q, torque_eci)

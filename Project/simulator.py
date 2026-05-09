@@ -402,6 +402,10 @@ class Simulator:
             "use_srp": self._config_bool(
                 self._section_value(environment_cfg, "use_srp", True), True
             ),
+            "use_gravity_gradient": self._config_bool(
+                self._section_value(environment_cfg, "use_gravity_gradient", True),
+                True,
+            ),
             "drag_coefficient": float(
                 self._section_value(environment_cfg, "drag_coefficient", 2.2)
             ),
@@ -412,6 +416,7 @@ class Simulator:
                 self._section_value(environment_cfg, "reference_area_m2", 0.01)
             ),
             "mass_kg": float(np.sum(self.spacecraft.mass_vector)),
+            "inertia_tensor": self.spacecraft.inertia_tensor,
             "sun_model": SunModel(
                 kernel_paths=self._section_value(environment_cfg, "kernel_paths", [])
             ),

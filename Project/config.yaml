@@ -213,6 +213,7 @@ environment_properties:
   enabled: True
   use_drag: True
   use_srp: True
+  use_gravity_gradient: True
   use_surface_geometry: True
   kernel_paths:
     - Project/kernels/naif0012.tls
