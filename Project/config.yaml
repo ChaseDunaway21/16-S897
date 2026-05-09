@@ -11,7 +11,7 @@ simulation_properties:
     value: 0.1 # seconds
 
   - name: max_simulation_time
-    value: 600.0 # seconds
+    value: 1000.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -47,8 +47,8 @@ initial_conditions:
 
   - name: attitude_rate
     value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
-    nominal_value: [0, 0, 1.0407409737537963] # rad/s, This applies to monte-carlo runs
-    deviation: [0.0, 0.0, 0.0] # rad/s
+    nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
+    deviation: [0.1, 0.1, 0.1] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
 safe_mode_properties:
@@ -63,7 +63,7 @@ safe_mode_properties:
     value: [0.0, 0.0, 1.0] # body-frame, solar normal is just +z for ARGUS
 
   - name: desired_spin_rate
-    value: 1.0407409737537963 # rad/s 10 RPM
+    value: 0 #1.0407409737537963 # rad/s 10 RPM
 
   - name: J_33_multiplier
     value: 1.2 # relative to principal J33 (i.e. J_eff = 1.2 means J_eff is 20% larger than the largest principal moment of inertia)
@@ -187,7 +187,7 @@ physical_properties:
 inertia_properties:
 
   - name: augment_inertia
-    value: False
+    value: True
 
   - name: inertia_seed
     value: 42
@@ -262,7 +262,7 @@ sensor_properties:
 
   magnetometer:
     enabled: True
-    update_rate_hz: 10.0
+    update_rate_hz: 3.0
     bias: [0, 0, 0] # uT [16.2709815383, 95.4802525636, -12.6296260353] from my measurements, but this assumes they were zero'd out
     covariance: [
       [5.47678999806,  1.11960431476,   0.151622883711 ],
@@ -273,7 +273,7 @@ sensor_properties:
 
   gyroscope:
     enabled: True
-    update_rate_hz: 10.0
+    update_rate_hz: 5.0
     bias: [0.004, 0.003, 0.0008] # initial b(t), rad/s from my measurement
     bias_random_walk_sigma: [0.000001, 0.000001, 0.000001] # (rad/s)/sqrt(s)
     covariance: [
@@ -307,13 +307,16 @@ sensor_properties:
 
 estimator_properties:
   enabled: True
-  sigma_initial_attitude: 0.1 # rad
-  sigma_initial_gyro_bias: 0.01 # rad/s
-  sigma_gyro_white: 0.001 # rad/sqrt(s)
-  sigma_gyro_bias_deriv: 0.00001 # (rad/s)/sqrt(s)
+  sigma_initial_attitude: 0.01 # rad
+  sigma_initial_gyro_bias: 0.003 # rad/s
+  sigma_gyro_white: 0.0005 # rad/sqrt(s)
+  sigma_gyro_bias_deriv: 2.4e-7 # (rad/s)/sqrt(s)
   sigma_sunsensor_direction: 0.1745 # rad, 0.1745 is roughly 10 degrees
-  sigma_magnetometer_direction: 0.05 # rad
+  sigma_magnetometer_direction: 0.1 # rad
   initial_gyro_bias: [0.0, 0.0, 0.0] # rad/s
+  initial_attitude: random # [q0, q1, q2, q3], truth, random, or random_unit
+  initial_attitude_random_sigma: 1.8 # rad, used when initial_attitude is random
+  initial_attitude_seed: 42
 
 plotting_properties:
 

@@ -22,6 +22,11 @@ from visualization import (
 )
 from world.controller import MagnetorquerOnlyController, ReactionWheelTVLQRController
 from world.estimator import MEKF
+from world.rotations_and_transformations import (
+    normalize_quaternion,
+    quaternion_from_rotation_vector,
+    quaternion_multiply,
+)
 from world.models.constants import MU_EARTH
 from world.dynamics import (
     environmental_acceleration,
@@ -728,14 +733,40 @@ class Simulator:
         )
 
         current_state = self.spacecraft.get_state()
+        true_attitude = current_state[self.idx["ATTITUDE"]]
+        initial_attitude = estimator_cfg.get("initial_attitude", true_attitude)
         estimator_state = np.zeros(7, dtype=float)
-        estimator_state[0:4] = np.asarray(
-            estimator_cfg.get(
-                "initial_attitude",
-                current_state[self.idx["ATTITUDE"]],
-            ),
-            dtype=float,
-        )
+        if isinstance(initial_attitude, str):
+            attitude_mode = initial_attitude.strip().lower()
+            if attitude_mode in {"truth", "true"}:
+                estimator_state[0:4] = true_attitude
+            else:
+                seed = int(
+                    estimator_cfg.get(
+                        "initial_attitude_seed",
+                        42 if self.single_run_seed is None else self.single_run_seed,
+                    )
+                )
+                rng = np.random.default_rng(seed)
+                if attitude_mode == "random":
+                    sigma = float(
+                        estimator_cfg.get(
+                            "initial_attitude_random_sigma",
+                            estimator_cfg.get("sigma_initial_attitude", 0.0),
+                        )
+                    )
+                    dphi = rng.normal(0.0, sigma, 3)
+                    estimator_state[0:4] = quaternion_multiply(
+                        true_attitude, quaternion_from_rotation_vector(dphi)
+                    )
+                elif attitude_mode == "random_unit":
+                    estimator_state[0:4] = normalize_quaternion(rng.standard_normal(4))
+                else:
+                    raise ValueError(
+                        "estimator_properties.initial_attitude must be a quaternion, truth, random, or random_unit"
+                    )
+        else:
+            estimator_state[0:4] = np.asarray(initial_attitude, dtype=float)
         estimator_state[4:7] = np.asarray(
             estimator_cfg.get("initial_gyro_bias", [0.0, 0.0, 0.0]),
             dtype=float,
@@ -751,7 +782,9 @@ class Simulator:
         self.sensor_records = {
             name: {"times_s": [], "measurements": []} for name in self.sensor_models
         }
-        self.sensor_next_update_times = {name: 0.0 for name in self.sensor_models}
+        self.sensor_next_update_times = {
+            name: self.sensor_update_periods[name] for name in self.sensor_models
+        }
 
     def _reset_estimator_records(self) -> None:
         self.estimator_records = {
@@ -1054,6 +1087,13 @@ class Simulator:
         sensor_properties = trial_cfg.get("sensor_properties", {}) or {}
         if isinstance(sensor_properties, dict) and "seed" in sensor_properties:
             sensor_properties["seed"] = seed + trial_index
+
+        estimator_properties = trial_cfg.get("estimator_properties", {}) or {}
+        if (
+            isinstance(estimator_properties, dict)
+            and "initial_attitude_seed" in estimator_properties
+        ):
+            estimator_properties["initial_attitude_seed"] = seed + trial_index
 
         controller_properties = trial_cfg.get("controller_properties", {}) or {}
         if isinstance(controller_properties, dict):
