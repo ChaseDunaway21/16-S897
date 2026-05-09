@@ -39,7 +39,7 @@
     \hline
     \changelogentry{v1.0}{2026-04-14}{Chase Dunaway}{Initial draft. Homework 1 submission. This is the Introduction, the Spacecraft model definition/config, the simulator dynamcis, and Euler's Equation.}
     \changelogentry{v2.0}{2026-05-09}{Chase Dunaway}{Homework 2 submission. This includes the Safe-Mode, implementation of the gyrostat into the simulator, sensor models, and Wahba's Problem. Momentum sphere plots were updated to also show energy gradient.}
-
+    \changelogentry{v2.0}{2026-05-10}{Chase Dunaway}{Homework 3 submission. This includes the affine sensor models and the MEKF analysis. Also fix unit error from Homework 2 related to the BMX160 datasheet.}
   \end{tabularx}
 }
 
@@ -76,7 +76,7 @@ ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination usin
 The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat} GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positioning systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
 
 \subsection{Orbit Description}
-ARGUS is planned for launch in Summer 2026 and deployment into a sun-synchronous low Earth orbit with an altitude of approximately \(600\) km and an inclination of approximately \(100^\circ\).
+ARGUS is planned for launch in Summer 2026 and deployment into a sun-synchronous low Earth orbit with an altitude of approximately $600$ km and an inclination of approximately $100^\circ$.
 
 
 \subsection{Mission Requirements and Objectives}
@@ -663,7 +663,7 @@ This gives the gyrostat equation
 
 \subsection{Super Spin}
 
-From the lecture notes, for positive nominal spin rate \(\omega_0>0\), the stability
+From the lecture notes, for positive nominal spin rate $\omega_0>0$, the stability
 conditions can be written as
 \begin{equation}
 \omega_0(J_{11}-J_{22})-\rho_2 < 0
@@ -716,8 +716,8 @@ J_{\mathrm{eff}}
 1.2\,J_{33}
 \end{equation}
 
-Therefore, for a desired spin rate \(\omega_0\), choose the rotor momentum
-\(\rho_2\) so that
+Therefore, for a desired spin rate $\omega_0$, choose the rotor momentum
+$\rho_2$ so that
 
 \begin{equation}
 J_{22}
@@ -785,7 +785,7 @@ The rotor momentum must also satisfy the scalar projection constraint
 \rho_s
 \end{equation}
 
-Since \(\boldsymbol{\omega}_d=\omega_s\mathbf{s}\), this can be written as
+Since $\boldsymbol{\omega}_d=\omega_s\mathbf{s}$, this can be written as
 \begin{equation}
 \boldsymbol{\omega}_d^T\boldsymbol{\rho}
 =
@@ -880,16 +880,6 @@ The perturbed inertia matrix is then
 \tilde V\tilde D\tilde V^T
 \end{equation}
 
-For numerical symmetry, the simulation has this additional step:
-\begin{equation}
-\tilde J
-\leftarrow
-\frac{1}{2}
-\left(
-\tilde J+\tilde J^T
-\right)
-\end{equation}
-
 \begin{figure}[H]
   \centering
   \makebox[\textwidth][c]{%
@@ -906,9 +896,23 @@ For numerical symmetry, the simulation has this additional step:
       \label{fig:hw2-momentum-sphere-nutation}
     \end{subfigure}%
   }
-  \caption{Momentum-sphere rotation around safe-mode.}
+  \caption{Momentum-sphere rotation around safe-mode.\protect\footnotemark}
   \label{fig:hw2-momentum-sphere-safe-mode}
 \end{figure}
+
+
+\footnotetext{The momentum-sphere has a color gradient representing the rotational kinetic energy~\cite{markley2014fundamentals}. For a gyrostat, the total body-frame angular momentum is
+Since \(\boldsymbol{\omega}=J^{-1}(\mathbf h_B-\boldsymbol{\rho})\), the
+rigid-body kinetic energy for a fixed angular-momentum magnitude is
+\[
+T
+=
+\frac{1}{2}
+\mathbf h^T
+J^{-1}
+\mathbf h 
+\]
+}
 
 \begin{figure}[ht]
   \centering
@@ -924,20 +928,6 @@ For numerical symmetry, the simulation has this additional step:
   \label{fig:hw2-sun-safe-mode-axis}
 \end{figure}
 
-
-
-\footnotetext{The momentum-sphere has a color gradient representing the rotational kinetic energy~\cite{markley2014fundamentals}. For a gyrostat, the total body-frame angular momentum is
-Since \(\boldsymbol{\omega}=J^{-1}(\mathbf h_B-\boldsymbol{\rho})\), the
-rigid-body kinetic energy for a fixed angular-momentum magnitude is
-\[
-T
-=
-\frac{1}{2}
-\mathbf h^T
-J^{-1}
-\mathbf h 
-\]
-}
 \clearpage
 \section{Attitude Sensors}
 
@@ -1029,7 +1019,29 @@ Recommended ODR, forced mode & 12.5 & Hz \\
 
 The accelerometer is completely unused in the simulation, but is configurable. 
 
-According to the datasheet, the noise of the gyro in deg/s should have a variance around $0.07^2$ or $1.49 * 10^{-6}$ deg/s. Similarly, the magnetometer should have a noise variance of $1.4^2$ or $1.96$ $\mu$T. 
+According to the datasheet, the gyroscope RMS noise is $0.07~\mathrm{deg/s}$. Therefore, the variance is
+$$
+(0.07)^2 = 4.9\times 10^{-3}~(\mathrm{deg/s})^2 = 1.49\times 10^{-6}~(\mathrm{rad/s})^2
+$$
+The datasheet specifies a gyroscope bias stability of $3~\mathrm{deg/hr}$, which corresponds to a bias scale of
+$$
+3~\mathrm{deg/hr}
+=
+1.45\times10^{-5}~\mathrm{rad/s}.
+$$
+
+If this rate were constant over one hour, then the random-walk bias estimate in $\mathrm{rad/s}/\sqrt{s}$ is:
+
+$$
+\sigma_{b_g}
+\approx
+\frac{1.45\times10^{-5}}{\sqrt{3600}}
+=
+2.4\times10^{-7}
+~\frac{\mathrm{rad/s}}{\sqrt{\mathrm{s}}}.
+$$
+
+Similarly, the magnetometer output noise in the datasheet is on the order of $\sim 1.4~\mu\mathrm{T}$ RMS (at low power mode), corresponding to a variance of roughly $(1.4~\mu\mathrm{T})^2 \approx 1.96~\mu\mathrm{T}^2$.
 
 In practice, this is not the case. Both of these numbers are substantially lower than the true measured output my sample BMX160. 
 
@@ -1050,7 +1062,7 @@ To get a better representation, I collected 14 hours worth of data and calculate
 \end{figure}
 
 \clearpage
-The measured covariance and biases was as follows:
+The measured covariance and biases were as follows:
 
 \begin{center}
 \textbf{Gyroscope}
@@ -1098,9 +1110,8 @@ R_m =
 ~\mu\mathrm{T}^2 
 \end{equation}
 
-While the gyro and magnetometer can update at much higher frequencies, setting the output to 10-5 Hz causes the simulator to slow down dramatically, especially so for the magnetometer since the measurement model (discussed later) samples the IGRF-14 model~\cite{iaga2024igrf14}.
+While the gyro and magnetometer can update at much higher frequencies, setting the output above $10$--$50~\mathrm{Hz}$ necessitates dramatically more computation but does improve MEKF convergence (see later). This comes at the cost of substantially slowing down the simulator, especially for the magnetometer since the measurement model samples the IGRF-14 model~\cite{iaga2024igrf14}.
 
-Lastly, the bias for the gyro is not constant. The datasheet claims a random walk of $3$ deg/hr, which is roughly $1.45 * 10^{-5}$ rad/s. This is set as the default random-walk value for all three-axis.
 
 \subsection{Magnetic Field Model}
 
@@ -1114,7 +1125,7 @@ In the simulation, the OPT4003 Sun Sensors used on ARGUS are abstracted to inste
 
 \subsection{Sun Model}
 
-The Sun model uses JPL/NAIF SPICE (via a Python interface)~\cite{naifSpiceToolkit} as well as a Montenbruck--Gill conical shadow model~\cite{montenbruck2000satelliteOrbits} to allow for eclipse effects to be generated.
+The Sun model uses JPL/NAIF SPICE ~\cite{naifSpiceToolkit} as well as a Montenbruck--Gill conical shadow model~\cite{montenbruck2000satelliteOrbits} to allow for eclipse effects to be generated.
 
 The Montenbruck--Gill conical shadow model is defined as so:
 
@@ -1196,13 +1207,13 @@ c < b-a,\\[6pt]
 
 \subsection{ArduCam 3 Cameras}
 
-Similarly to the Sun Sensor, the ArduCam 3 module is abstracted to give a bearing vector output. The role of the cameras is to take photos of landmarks and perform inference using vision models. As a result, the update rate for the cameras are arbitrarily set to $0.01$ Hz as it is unreasonable to have a high update rate for these measurements. However, the resolution of the images is high, with the bounding-boxes around many landmarks being small relative to $75^{\circ}$ F.o.V. Assuming a $10$ km error when nadir pointing, this gives $~0.5^{\circ}$ pointing accuracy, which is signficantly higher than that of the coarse Sun Sensor.
+Similarly to the Sun Sensor, the ArduCam 3 module is abstracted to give a bearing vector output. The role of the cameras is to take photos of landmarks and perform inference using vision models. As a result, the update rate for the cameras are arbitrarily set to $0.01$ Hz as it is unreasonable to have a high update rate for these measurements. However, the resolution of the images is high, with the bounding-boxes around many landmarks being small relative to $75^{\circ}$ F.o.V. Assuming a $10$ km error when nadir pointing, this gives $\sim0.5^{\circ}$ pointing accuracy, which is significantly higher than that of the coarse Sun Sensor.
 
 \subsection{Earth-Camera Model}
 
 The Earth-Image-Capture Model is currently defined in the code as a bearing measurement from the satellite to a target within some accuracy. In the future, targets will be defined in ECEF and measurements will only be taken if the satellite passes overhead. But currently, the model is simply constrained periodically only.
 
-\subsection{Bearing-Vector Noise Sampling}
+\subsection{Bearing-Vector Noise Sampling}\label{sec:bearing-noise}
 
 To add noise to the bearing-vector measurements, the noise covariance is defined using a simple orthogonal projection of Gaussian, isotropic noise (consistent with standard two-vector attitude-determination measurement models)~\cite{markley1998twoVector}:
 
@@ -1211,7 +1222,7 @@ W_b
 =
 \sigma_\theta^2
 \left(
-I_3-\mathbf b\mathbf b^T
+I-\mathbf b\mathbf b^T
 \right)
 \end{equation}
 
@@ -1226,16 +1237,23 @@ The variance $\sigma_{\theta}^2$ is set in the \texttt{config.yaml} file.
 
 \begin{figure}[H]
   \centering
+  \includegraphics[width=0.35\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_camera_measurements.png}}
+  \caption{Camera bearing-vector measurements over 20 minute simulation.}
+  \label{fig:hw2-simulation-camera-measurements}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
   \includegraphics[width=0.90\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/18_orbit_simulation_sensors.png}}
   \caption{Sensor measurements over an 18-orbit simulation in safe-mode.}
   \label{fig:hw2-18-orbit-sensors}
 \end{figure}
 
+
 \clearpage
-\section{Wahba's Problem}
+\section{Wahba's Problem}\label{sec:wahbas-problem}
 
 In class, Wahba's Problem was solved three ways: Singular-Value Decomposition (SVD), the q-Method, and Semi-Definite Programming (SDP). In my simulator I have implemented the SVD and SDP methods.
-
 \subsubsection{SVD Wahba Solution}
 
 Given body-frame measurements \(\mathbf b_i\) and inertial reference vectors
@@ -1332,8 +1350,8 @@ Q_{\mathrm{SDP}}
 \quad
 &
 \begin{bmatrix}
-I_3 & Q^T\\
-Q & I_3
+I & Q^T\\
+Q & I
 \end{bmatrix}
 \succeq 0 
 \end{aligned}
@@ -1346,7 +1364,7 @@ ARGUS is configured to have three sensors that output bearing-vector measurement
 
 In the first case, the bearing measurements have no noise. Here the SVD, SDP, and truth align closely. In 100-trials, the maximum error was $0.00^{\circ}$ and the mean was $0.00^{\circ}$ for both the SVD and SDP methods.
 
-In the second case, the measurements have the configured noise. Here the SVD and SDP methods struggle, as the sun-sensor is only accurate to within $~5^{\circ}$. Also, in trials where two-measurements are nearly aligned, the solution is significantly further off. In 100-trials, the maximum error was $~28.3^{\circ}$ and the mean was $10.1^{\circ}$ for both the SVD and SDP methods.
+In the second case, the measurements have the configured noise. Here the SVD and SDP methods struggle, as the sun-sensor is only accurate to within $\sim5^{\circ}$. Also, in trials where two-measurements are nearly aligned, the solution is significantly further off. In 100-trials, the maximum error was $\sim28.3^{\circ}$ and the mean was $10.1^{\circ}$ for both the SVD and SDP methods.
 
 Something to note is that the measurements are weighted with identity when creating the $\boldsymbol{B}$ matrix. Weighting the camera measurement significantly higher would help, but even so the variance from the BMX160 and coarse Sun Sensor is still poor for precise attitude determination with only three measurements at any given timestep.
 
@@ -1392,6 +1410,327 @@ Something to note is that the measurements are weighted with identity when creat
 
   \caption{Wahba Monte Carlo results (noisy case).}
   \label{fig:wahba-mc-noisycase}
+\end{figure}
+
+\clearpage
+\section{Attitude Sensors Revisited}
+
+Since the measurement models have already been implemented based on the true sensors on ARGUS, the only substantial change left is to add the affine form, which in this case is the matrix $\boldsymbol{M}$.
+
+For the vector measurements, the following model is applied:
+\begin{equation}
+y_{\mathrm{meas}}
+=
+M y_{\mathrm{true}} + b + w,
+\qquad
+w \sim \mathcal{N}(0,R_v).
+\end{equation}
+
+For the gyroscope, the only difference is that b(t) is a random walk, and the measurement for the gyro is the direct gyro output itself.
+\begin{equation}
+    y_{gyro} = M \, \omega_{true} + b(t) + w,
+    \qquad
+    w \sim \mathcal{N}(0,R_g)
+\end{equation}
+There is no star tracker measurement model since ARGUS does not utilize one.
+
+For all of these cases, I define $\boldsymbol{M}$ as the identity since the simulated measurements do not account for misalignment.
+
+\section{Recursive Attitude Estimation}
+
+\subsubsection{MEKF State}
+
+The MEKF state is
+\begin{equation}
+x_{k|k}
+=
+\begin{bmatrix}
+q_{k|k}\\
+\mathbf b_{g,k|k}
+\end{bmatrix},
+\end{equation}
+where $\hat q_{k|k}$ is the estimated attitude quaternion and
+${\mathbf b}_{g,k|k}$ is the estimated gyro bias.
+
+The error state is
+\begin{equation}
+ x_k
+=
+\begin{bmatrix}
+\boldsymbol{\phi}_k\\
+\mathbf b_{g,k}
+\end{bmatrix}
+\in\mathbb R^6
+\end{equation}
+
+\subsubsection{Gyroscope Prediction Step}
+
+At time step \(k\), the gyroscope measurement is
+\begin{equation}
+\mathbf y_{g,k}
+=
+\boldsymbol{M \omega}_k
++
+\mathbf b_{g,k}
++
+\mathbf w_{g,k}
+\end{equation}
+(Where M is an identity in this simulation)
+The bias-corrected angular velocity used for propagation is
+\begin{equation}
+\boldsymbol{\omega}_k
+=
+\mathbf y_{g,k}
+-
+\mathbf b_{g,k|k}
+\end{equation}
+
+The predicted attitude is
+\begin{equation}
+q_{k+1|k}
+=
+q_{k|k}
+\otimes
+\exp_q
+\left(
+\frac{1}{2} t\,H\boldsymbol{\omega}_k
+\right)
+\end{equation}
+The gyro bias is modeled as constant over the prediction step:
+\begin{equation}
+\mathbf b_{g,k+1|k}
+=
+\mathbf b_{g,k|k}
+\end{equation}
+
+\subsubsection{Prediction Covariance Update}
+
+The prediction covariance update is
+\begin{equation}
+P_{k+1|k}
+=
+A_kP_{k|k}A_k^T
++
+Q_k t
+\end{equation}
+
+The noise covariance is
+\begin{equation}
+Q_k
+=
+\begin{bmatrix}
+\sigma_g^2 I & 0\\
+0 & \sigma_{\dot b_g}^2 I
+\end{bmatrix}
+\end{equation}
+
+The discrete error-state Jacobian
+
+\begin{equation}
+A_k
+=
+\frac{\partial  x_{k+1}}{\partial  x_k}
+=
+\begin{bmatrix}
+\dfrac{\partial \boldsymbol{\phi}_{k+1}}
+      {\partial \boldsymbol{\phi}_{k}}
+&
+\dfrac{\partial \boldsymbol{\phi}_{k+1}}
+      {\partial \boldsymbol{\beta}_{k}}
+\\[2ex]
+    0
+&
+    I
+\end{bmatrix}
+\end{equation}
+
+The top left block is
+
+\[
+\frac{\partial \phi_{k+1}}{\partial \phi_k}
+=
+G(q_{k+1|k})^T R( q_k)G(q_{k|k})
+\]
+
+
+The top right block is
+
+\begin{equation}
+\dfrac{\partial \boldsymbol{\phi}_{k+1}}
+      {\partial \boldsymbol{\beta}_{k}}
+=
+-\frac{1}{2} t\,
+G( q_{k+1|k})^TG( q_{k|k})
+\end{equation}
+
+\subsubsection{Vector Measurement Prediction}
+
+The innovation is
+\begin{equation}
+\mathbf z_{k+1}
+=
+\mathbf y_{k+1}
+-
+R( q_{k+1|k})^T
+\mathbf r_{I,k+1}
+\end{equation}
+
+\subsubsection{Vector Measurement Jacobian}
+
+The measurement Jacobian is
+\begin{equation}
+C_{k+1}
+=
+\begin{bmatrix}
+\dfrac{\partial \boldsymbol{y}_{k}}
+      {\partial \boldsymbol{\phi}_{k}}
+ & 0
+\end{bmatrix}
+\end{equation}
+
+Where
+\begin{equation}
+\dfrac{\partial \boldsymbol{y}_{k}}
+      {\partial \boldsymbol{\phi}_{k}}
+=
+H^T
+\left[
+  L(q_{k+1|k})^T
+\ L(H\mathbf r_{I,k+1})
++
+\ R( q_{k+1|k})
+\ R(H\mathbf r_{I,k+1})
+T
+\right]
+G(q_{k+1|k})
+\end{equation}
+
+Here \(H\) maps a 3-vector into a pure-vector quaternion:
+\begin{equation}
+H
+=
+\begin{bmatrix}
+0 & 0 & 0\\
+1 & 0 & 0\\
+0 & 1 & 0\\
+0 & 0 & 1
+\end{bmatrix},
+\end{equation}
+and
+\begin{equation}
+T
+=
+\operatorname{diag}(1,-1,-1,-1)
+\end{equation}
+
+\subsubsection{Measurement Covariance}
+
+For a unit vector measurement with angular standard deviation \(\sigma_y\), the measurement covariance is modeled the same way as before, as described in Section~\ref{sec:bearing-noise}.
+
+\begin{equation}
+R_{y,k+1}
+=
+\sigma_y^2
+\left(
+I
+-
+\hat{\mathbf y}_{k+1|k}
+\hat{\mathbf y}_{k+1|k}^T
+\right)
+\end{equation}
+
+\subsubsection{Measurement Update}
+
+The innovation covariance is
+\begin{equation}
+S_{k+1}
+=
+C_{k+1}
+P_{k+1|k}
+C_{k+1}^T
++
+R_{y,k+1}
+\end{equation}
+
+The Kalman gain is
+\begin{equation}
+K_{k+1}
+=
+P_{k+1|k}
+C_{k+1}^T
+S_{k+1}^{-1}
+\end{equation}
+
+The error-state correction is
+\begin{equation}
+\phi_{k+1|k+1}
+=
+K_{k+1}\mathbf z_{k+1}
+\end{equation}
+
+\subsubsection{Multiplicative State Correction}
+
+The attitude correction quaternion is constructed from
+$\boldsymbol{\phi}_{k+1}$ as
+\begin{equation}
+q_{k+1}
+=
+L(q_{k+1|k})
+\begin{bmatrix}
+\sqrt{1-\boldsymbol{\phi}_{k+1}^T
+\boldsymbol{\phi}_{k+1}}\\
+\boldsymbol{\phi}_{k+1}
+\end{bmatrix}
+\end{equation}
+
+Then, repeat and update the attitude quaternion and gyro bias.
+
+\subsection{Sample Rate}
+
+Ideally, ARGUS would have the ability to slew accurately and quickly as it takes photos of Earth. Roughly, assume that ARGUS can capture a landmark and detect it as long as it is within $60^{\circ}$ of the axis directly nadir of a landmark. Given that the satellite may not pass directly over the landmark, it can be estimated that a ground pass inside the visibility window would last $\sim5$ minutes. 
+
+This corresponds to an accuracy of $0.007$ rad/s slew rate, which is on the same order of magnitude as the pointing accuracy of the camera $\sim 0.5^{\circ}$. As a result, the estimator should be configured to update at $\ge 1$ Hz.
+
+\subsection{MEKF vs. Wahba's Problem}
+
+As the total number of estimates increases, the error converges to 0. In Wahba's Problem, the total number of measurements available at any specific point limited the accuracy of the solution. Moreover, in the scenario where two or more of bearing vectors aligned closely, the solution would suffer from a poor dilution of precision. Coupled with the coarseness of the Sun Sensor and the noisy BMX160, the mean error of the MEKF's solution would be significantly better only after a few timesteps as more measurements were collected (also noting that as the spacecraft is tumbling, the measurements are able to capture more geometric diversity). 
+
+\subsection{MEKF Consistency}
+
+The MEKF errors are generally consistent with the measurements. Only at the beginning if the initial attitude is far from the initial \textit{guessed} attitude do the estimates fall out of the 3-sigma bounds. As more measurements are collected, especially with the camera updates, the estimate errors will converge towards zero.
+
+\subsection{Convergence Testing}
+
+In testing, I found the attitude state of the MEKF struggles to converge quickly if the initial estimate is more than $\sim 90^{\circ}$ off from the starting attitude. However, in all cases that I tested, the MEKF was still able to converge given enough time/measurements. Moreover, tuning the covariance gains to be within or above an order of magnitude greater than the specified sensor models kept the filter from becoming overconfident. Increasing the rate of camera measurements, or decreasing the noise characteristics of the sensors, would help to increase convergence as expected. Lastly, if the update rate was low, it would further decrease the time it would take to converge, up to a point where it could no longer converge to the rotation of the spacecraft.
+
+Relative to the attitude states, the gyro bias states converge quickly towards the true value regardless of the initial attitude.
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{\detokenize{Homework 3/simulation_estimator_01.png}}
+  \caption{Estimator performance for initial attitude error $< 10^{\circ}$.}
+  \label{fig:hw3-estimator-01}
+\end{figure}
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{\detokenize{Homework 3/simulation_estimator_1.png}}
+  \caption{Estimator performance for initial attitude error $\sim 75^{\circ}$.}
+  \label{fig:hw3-estimator-1}
+\end{figure}
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{\detokenize{Homework 3/simulation_estimator_1_8.png}}
+  \caption{Estimator performance for initial attitude error $> 130^{\circ}$.}
+  \label{fig:hw3-estimator-18}
+\end{figure}
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{\detokenize{Homework 3/simulation_sensors.png}}
+  \caption{Measurement history used by the MEKF simulations.}
+  \label{fig:hw3-measurements}
 \end{figure}
 
 
