@@ -1493,7 +1493,7 @@ q_{k|k}
 \otimes
 \exp_q
 \left(
-\frac{1}{2} t\,H\boldsymbol{\omega}_k
+\frac{1}{2} \Delta t\,H\boldsymbol{\omega}_k
 \right)
 \end{equation}
 The gyro bias is modeled as constant over the prediction step:
@@ -1549,7 +1549,7 @@ The top left block is
 \[
 \frac{\partial \phi_{k+1}}{\partial \phi_k}
 =
-G(q_{k+1|k})^T R( q_k)G(q_{k|k})
+G(q_{k+1|k})^T R(\Delta q_k)G(q_{k|k})
 \]
 
 
@@ -1557,10 +1557,10 @@ The top right block is
 
 \begin{equation}
 \dfrac{\partial \boldsymbol{\phi}_{k+1}}
-      {\partial \boldsymbol{\beta}_{k}}
+      {\partial \delta\mathbf b_{g,k}}
 =
--\frac{1}{2} t\,
-G( q_{k+1|k})^TG( q_{k|k})
+-\frac{1}{2}\Delta t\,
+G(q_{k|k})^TG(q_{k|k}).
 \end{equation}
 
 \subsubsection{Vector Measurement Prediction}
