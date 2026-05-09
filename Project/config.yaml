@@ -47,7 +47,7 @@ initial_conditions:
 
   - name: attitude_rate
     value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
-    nominal_value: [0, 0, 0] # rad/s, This applies to monte-carlo runs
+    nominal_value: [0, 0, 1.0407409737537963] # rad/s, This applies to monte-carlo runs
     deviation: [0.0, 0.0, 0.0] # rad/s
     perturbation: [0.04, 0.04, 0.04] # absolute value, rad/s
 
@@ -210,11 +210,11 @@ integration_properties:
     value: rk4
 
 environment_properties:
-  enabled: True
+  enabled: False
   use_drag: True
   use_srp: True
   use_gravity_gradient: True
-  use_surface_geometry: True
+  use_surface_geometry: True # This is used by the drag and SRP models for surface areas and normals
   kernel_paths:
     - Project/kernels/naif0012.tls
     - Project/kernels/de442s.bsp
@@ -223,7 +223,7 @@ environment_properties:
   reference_area_m2: 0.01 # This 'reference' area is an assumed effective area, it's only used if use_surface_geometry is False
 
 actuator_properties:
-  enabled: True
+  enabled: False
 
   reaction_wheel:
     enabled: True
@@ -236,7 +236,7 @@ actuator_properties:
     wheel_speeds: [0.0, 0.0, 0.0]
 
 controller_properties:
-  enabled: True
+  enabled: False
   type: reaction_wheel_tvlqr # reaction_wheel_tvlqr or magnetorquer_only
   update_rate_hz: 0.0 # <= 0 updates every integration step
 
@@ -262,8 +262,8 @@ sensor_properties:
 
   magnetometer:
     enabled: True
-    update_rate_hz: 1.0
-    bias: [0, 0, 0,] # uT [16.2709815383, 95.4802525636, -12.6296260353] from my measurements, but this assumes they were zero'd out
+    update_rate_hz: 10.0
+    bias: [0, 0, 0] # uT [16.2709815383, 95.4802525636, -12.6296260353] from my measurements, but this assumes they were zero'd out
     covariance: [
       [5.47678999806,  1.11960431476,   0.151622883711 ],
       [1.11960431476,  1.20637910543,   0.0291750864857],
@@ -273,7 +273,7 @@ sensor_properties:
 
   gyroscope:
     enabled: True
-    update_rate_hz: 5.0
+    update_rate_hz: 10.0
     bias: [0.004, 0.003, 0.0008] # initial b(t), rad/s from my measurement
     bias_random_walk_sigma: [0.000001, 0.000001, 0.000001] # (rad/s)/sqrt(s)
     covariance: [
@@ -296,12 +296,12 @@ sensor_properties:
       - Project/kernels/naif0012.tls
       - Project/kernels/de442s.bsp
     bias: [0.0, 0.0, 0.0] # unit-vector bias
-    sigma_angle_deg: 10 # 1-sigma bearing angle precision [deg]
+    sigma_angle_deg: 5 # 1-sigma bearing angle precision [deg]
 
   visual_camera:
     enabled: True
     update_rate_hz: 0.01
-    target_position_eci: [0.0, 0.0, 0.0] # m
+    target_position_eci: [0.0, 0.0, 0.0] # m Center of the Earth.
     bias: [0.0, 0.0, 0.0] # bearing-vector bias
     sigma_angle_deg: 0.5 # 1-sigma bearing angle precision [deg] a value of 1 degree at 590 km is rouhgly 10 km error in nadir
 

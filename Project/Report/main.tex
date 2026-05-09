@@ -10,12 +10,13 @@
 \usepackage{listings}
 \usepackage{fancyhdr}
 \usepackage{titlesec}
+\usepackage{siunitx}
 \usepackage{subcaption}
 
 % Larger heading font sizes
 \titleformat{\section}{\normalfont\LARGE\bfseries}{\thesection}{1em}{}
 \titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{1em}{}
-\titleformat{\subsubsection}{\normalfont\medium\bfseries}{\thesubsubsection}{1em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}
 
 % Header/footer: title + author + page numbers
 \pagestyle{fancy}
@@ -36,7 +37,9 @@
   \begin{tabularx}{\textwidth}{@{}l l l >{\raggedright\arraybackslash}X@{}}
     \textbf{Version} & \textbf{Date} & \textbf{Author} & \textbf{Changes} \\
     \hline
-    \changelogentry{v1.0}{2026-04-14}{Chase Dunaway}{Initial draft. Homework 1 submission.}
+    \changelogentry{v1.0}{2026-04-14}{Chase Dunaway}{Initial draft. Homework 1 submission. This is the Introduction, the Spacecraft model definition/config, the simulator dynamcis, and Euler's Equation.}
+    \changelogentry{v2.0}{2026-05-09}{Chase Dunaway}{Homework 2 submission. This includes the Safe-Mode, implementation of the gyrostat into the simulator, sensor models, and Wahba's Problem. Momentum sphere plots were updated to also show energy gradient.}
+
   \end{tabularx}
 }
 
@@ -60,17 +63,17 @@
 \newpage
 
 \section{Introduction}
-ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination using images of Earth's surface captured by the spacecraft\footnote{Much of the following report is heavily motivated by the implementation details of the ongoing ARGUS development simulator.}. It is planned for launch in the Summer of 2026.
+ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination using images of Earth's surface captured by the spacecraft\footnote{Much of the following report is heavily motivated by the implementation details of the ongoing ARGUS development simulator.} It is planned for launch in the Summer of 2026.
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.4\linewidth]{\detokenize{ARGUS Satellite Images/FullBuild.png}}
+  \includegraphics[width=0.4\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/FullBuild.png}}
   \caption{ARGUS CAD model.}
   \label{fig:argus-fullbuild}
 \end{figure}
 
 \subsection{Mission Purpose}
-The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat}. GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positioning systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
+The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat} GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positioning systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
 
 \subsection{Orbit Description}
 ARGUS is planned for launch in Summer 2026 and deployment into a sun-synchronous low Earth orbit with an altitude of approximately \(600\) km and an inclination of approximately \(100^\circ\).
@@ -102,7 +105,7 @@ At a high level, ARGUS will operate as a state-machine.
 For the purposes of this report, ARGUS is modeled as a uniformly dense 1U cube with four deployable panels. The geometry of the main chassis and the deployed panels are included to capture the effect of the panels on the spacecraft mass properties, inertia matrix, and environmental torque model.
 
 \subsection{Sensors}
-The sensor suite consists of a 9-axis Bosch BMX160 IMU, a SkyTraq S1216F8-GL GNSS receiver, nine photodiodes, and four 4K Raspberry Pi Module 3 cameras with a $75^\circ$ field of view. The magnetometer measurements and gyroscope measurements will be used for detumbling, with the gyroscope measurements also being used for orbit determination. The GNSS receiver will provide timing and a positional baseline to compare against. The sun sensors will be used for sun-pointing. Finally, the cameras will be used to take roughly nadir pointing photos of Earth's surface for inference and orbit determination.
+The sensor suite consists of a 9-axis Bosch BMX160 IMU~\cite{bosch2018bmx160}, a SkyTraq S1216F8-GL GNSS receiver, nine OPT4003 photodiode sun sensors~\cite{ti_opt4003q1_2026}, and four Arducam (IMX708) Raspberry Pi Camera Module 3 cameras~\cite{arducam_imx708_2026} with a $75^\circ$ field of view. The magnetometer measurements and gyroscope measurements will be used for detumbling, with the gyroscope measurements also being used for orbit determination. The GNSS receiver will provide timing and a positional baseline to compare against. The sun sensors will be used for sun-pointing. Finally, the cameras will be used to take roughly nadir pointing photos of Earth's surface for inference and orbit determination.
 
 \subsection{Actuators}
 The attitude control system consists of six magnetorquers arranged in each of the six faces of the main body. These are used for initial detumbling and control.
@@ -122,12 +125,12 @@ The spacecraft model, initial conditions, and simulation settings are defined in
   \centering
   \begin{minipage}[t]{0.49\linewidth}
     \centering
-    \includegraphics[width=0.6\linewidth]{\detokenize{ARGUS Satellite Images/Body and Coordinates.png}}\\
+    \includegraphics[width=0.6\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/Body and Coordinates.png}}\\
     {\footnotesize Main Body $\approx$ Cube}
   \end{minipage}
   \begin{minipage}[t]{0.49\linewidth}
     \centering
-    \includegraphics[width=0.3\linewidth]{\detokenize{ARGUS Satellite Images/Deployable.png}}\\
+    \includegraphics[width=0.3\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/Deployable.png}}\\
     {\footnotesize Deployable Panel $\approx$ Thin Rectangular Prism}
   \end{minipage}
   \caption{Two major discretized components used to define the spacecraft model.}
@@ -136,7 +139,7 @@ The spacecraft model, initial conditions, and simulation settings are defined in
 
 \begin{figure}[ht]
     \centering
-    \includegraphics[width=0.8\linewidth]{ARGUS Satellite Images/Discretized Components.png}
+    \includegraphics[width=0.8\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/Discretized Components.png}}
     \caption{Discretized Components}
     \label{fig:discretized-components}
 \end{figure}
@@ -402,7 +405,7 @@ Using equation \eqref{eq:Jcom}, the total moment of inertia of ARGUS is calculat
 0 & 0 & 3.61\times10^{-2}
 \end{bmatrix}
 \quad [\mathrm{kg\,m^2}]\\
-\mathbf{{}^{N}R^{B}} &=
+\mathbf{{}^{P}R^{B}} &=
 \begin{bmatrix}
 9.01\times10^{-3} & -1.67\times10^{-2} & 1.00 \\
 1.00 & 2.48\times10^{-2} & -8.60\times10^{-3} \\
@@ -444,7 +447,7 @@ where $\mathbf{r}$ is position, $\mathbf{\dot{r}}$ is velocity, $\mathbf{q} = [q
 
 \subsection{Initialization from Orbital Elements}
 
-The initial state $\mathbf{r}$ and $\mathbf{\dot{r}}$ is constructed from the orbital elements $(a,e,i,\Omega,\omega,\nu)$ using the methods in \cite{markley2014fundamentals}.
+The initial state $\mathbf{r}$ and $\mathbf{\dot{r}}$ is constructed from the orbital elements $(a,e,i,\Omega,\omega,\nu)$ using the methods in \cite{markley2014fundamentals}
 \begin{equation}
 p = a(1-e^2),
 \end{equation}
@@ -462,7 +465,7 @@ and the perifocal velocity
 \mathbf{v}_{PQW} = \sqrt{\frac{\mu}{p}}
 \begin{bmatrix}
 -\sin\nu \\ e+\cos\nu \\ 0
-\end{bmatrix}.
+\end{bmatrix}
 \end{equation}
 These vectors are rotated into the inertial reference by the following rotation matrix
 \begin{equation}
@@ -497,7 +500,7 @@ where the $J_2$ perturbation is
 x\left(5\frac{z^2}{\|\mathbf{r}\|^2}-1\right) \\
 y\left(5\frac{z^2}{\|\mathbf{r}\|^2}-1\right) \\
 z\left(5\frac{z^2}{\|\mathbf{r}\|^2}-3\right)
-\end{bmatrix}.
+\end{bmatrix}
 \end{equation}
 
 \subsection{Quaternion Kinematics}
@@ -533,7 +536,7 @@ with the quaternion being normalized after each iteration $\|\mathbf{q}\|=1$.
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.5\linewidth]{\detokenize{ARGUS Satellite Images/simulation_trajectory.png}}
+  \includegraphics[width=0.5\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/simulation_trajectory.png}}
   \caption{Orbit trajectory from the dynamics simulation. The simulation was run for 580000 seconds ($\sim$100 orbits).}
   \label{fig:orbit-trajectory}
 \end{figure}
@@ -544,7 +547,7 @@ with the quaternion being normalized after each iteration $\|\mathbf{q}\|=1$.
 \subsection{Rigid-Body Attitude Dynamics}
 The dynamics for $\dot{\omega}$ are given with Euler's equation in the body frame without external torque
 \begin{equation}
-\mathbf{J}\dot{\boldsymbol{\omega}} + \boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega}) = \mathbf{0}.
+\mathbf{J}\dot{\boldsymbol{\omega}} + \boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega}) = \mathbf{0}
 \end{equation}
 Which is equivalent to:
 \begin{equation}
@@ -554,11 +557,11 @@ Which is equivalent to:
 \subsection{Angular Momentum and Momentum Sphere}
 The body angular momentum is
 \begin{equation}
-\mathbf{h} = \mathbf{J}\boldsymbol{\omega}.
+\mathbf{h} = \mathbf{J}\boldsymbol{\omega}
 \end{equation}
 To visualize the momentum sphere, the normalized momentum vector is plotted
 \begin{equation}
-\hat{\mathbf{h}} = \frac{\mathbf{h}}{\|\mathbf{h}\|}.
+\hat{\mathbf{h}} = \frac{\mathbf{h}}{\|\mathbf{h}\|}
 \end{equation}
 The equilibrium points correspond to rotation about the principal axes, i.e., directions aligned with the eigenvectors of $\mathbf{J}$.
 
@@ -567,13 +570,13 @@ The equilibrium points correspond to rotation about the principal axes, i.e., di
   \centering
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/simulation_plot_100_q.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/simulation_plot_100_q.png}}
     \caption{100 Second simulation plotted with quaternion attitude.}
     \label{fig:sim-100-q}
   \end{subfigure}\hfill
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/simulation_plot_100_e.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/simulation_plot_100_e.png}}
     \caption{100 Second simulation plotted with euler-angle attitude.}
     \label{fig:sim-100-e}
   \end{subfigure}
@@ -586,13 +589,13 @@ The equilibrium points correspond to rotation about the principal axes, i.e., di
   \centering
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere_1.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/momentum_sphere_1.png}}
     \caption{Rotation about inertial axis 1.}
     \label{fig:momentum-sphere-axis1}
   \end{subfigure}\hfill
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere_2.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/momentum_sphere_2.png}}
     \caption{Rotation about inertial axis 2.}
     \label{fig:momentum-sphere-axis2}
   \end{subfigure}
@@ -601,13 +604,13 @@ The equilibrium points correspond to rotation about the principal axes, i.e., di
 
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere_3.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/momentum_sphere_3.png}}
     \caption{Rotation about inertial axis 3.}
     \label{fig:momentum-sphere-axis3}
   \end{subfigure}\hfill
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/momentum_sphere.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/momentum_sphere.png}}
     \caption{Control (reference) momentum sphere (no perturbation, ideal model assumptions).}
     \label{fig:momentum-sphere-control}
   \end{subfigure}
@@ -618,10 +621,779 @@ The equilibrium points correspond to rotation about the principal axes, i.e., di
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.95\linewidth]{\detokenize{ARGUS Satellite Images/monte_carlo_components.png}}
+  \includegraphics[width=0.95\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/monte_carlo_components.png}}
   \caption{25 simulated runs deviated orbital inclinations and initial angular velocities.}
   \label{fig:monte-carlo-components-inclination-omega}
 \end{figure}
+
+\clearpage
+\section{Safe-Mode}
+
+For satellites that operate autonomously, a "safe mode" can ensure the satellite obtains an attitude that maximizes its chance to recover while in an inhibited state. For example, a low battery could trigger this state and cause the satellite to attempt to point at the sun while turning off all but its necessary functionality while it recharges.
+
+In the case of this simulated ARGUS, the greater area for solar power generation is by pointing the +z-axis towards the sun. However, in this ARGUS only has magnetorquers, so in this report the simulated satellite differs.
+
+\subsection{Modified Euler's Equation}
+
+First, Euler's equation is modified to include the rotors' angular momentum:
+
+\begin{equation}
+\mathbf {}^Bh
+= J{}^B\boldsymbol{\omega}
++
+{}^B\boldsymbol{\rho}
+\end{equation}
+
+This gives the gyrostat equation
+
+\begin{equation}
+\tilde J{}^B\dot{\boldsymbol{\omega}}
++
+{}^B\dot{\boldsymbol{\rho}}
++
+{}^B\boldsymbol{\omega}\times
+\left(
+\tilde J{}^B\boldsymbol{\omega}
++
+\boldsymbol{{}^B\rho}
+\right)
+=
+{}^B\boldsymbol{\tau}
+\end{equation}
+
+\subsection{Super Spin}
+
+From the lecture notes, for positive nominal spin rate \(\omega_0>0\), the stability
+conditions can be written as
+\begin{equation}
+\omega_0(J_{11}-J_{22})-\rho_2 < 0
+\end{equation}
+and
+\begin{equation}
+\omega_0(J_{22}-J_{33})+\rho_2 > 0
+\end{equation}
+
+Rearranging these, you get
+\begin{equation}
+\omega_0
+\left[
+J_{11}
+-
+\left(
+J_{22}+\frac{\rho_2}{\omega_0}
+\right)
+\right]
+<0
+\end{equation}
+and
+\begin{equation}
+\omega_0
+\left[
+\left(
+J_{22}+\frac{\rho_2}{\omega_0}
+\right)
+-
+J_{33}
+\right]
+>0
+\end{equation}
+
+In both of these cases, the rotor momentum modifies the inertia about the spin axis. In other words, the \textit{effective} spin-axis inertia is
+
+\begin{equation}
+J_{\mathrm{eff}}
+=
+J_{22}
++
+\frac{\rho_2}{\omega_0}
+\end{equation}
+
+For stability, the effective inertia should be larger than the largest, unmodified principal inertia
+
+\begin{equation}
+J_{\mathrm{eff}}
+\ge
+1.2\,J_{33}
+\end{equation}
+
+Therefore, for a desired spin rate \(\omega_0\), choose the rotor momentum
+\(\rho_2\) so that
+
+\begin{equation}
+J_{22}
++
+\frac{\rho_2}{\omega_0}
+=
+J_{\mathrm{eff}}
+\end{equation}
+
+Solving for the required rotor momentum gives
+\begin{equation}
+\rho_2
+=
+\omega_0
+\left(
+J_{\mathrm{eff}}-J_{22}
+\right).
+\end{equation}
+
+\subsection{Dynamic Balance}
+
+For the desired spin to be dynamically balanced, the total angular momentum must
+be parallel to the angular velocity:
+\begin{equation}
+\boldsymbol{\omega}_d
+\times
+\left(
+J\boldsymbol{\omega}_d
++
+\boldsymbol{\rho}
+\right)
+=
+\mathbf{0}
+\end{equation}
+
+Equivalently,
+\begin{equation}
+\boldsymbol{\omega}_d^\times \boldsymbol{\rho}
+=
+-
+\boldsymbol{\omega}_d^\times J\boldsymbol{\omega}_d 
+\end{equation}
+
+The inertia about the desired spin axis is
+\begin{equation}
+J_s
+=
+\mathbf{\frac{\omega}{\omega_s}}^T J \mathbf{\frac{\omega}{\omega_s}}
+\end{equation}
+
+The required spin-axis rotor momentum is
+\begin{equation}
+\rho_s
+=
+\omega_s
+\left(
+J_{\mathrm{eff}}-J_s
+\right)
+\end{equation}
+
+The rotor momentum must also satisfy the scalar projection constraint
+\begin{equation}
+\mathbf{s}^T\boldsymbol{\rho}
+=
+\rho_s
+\end{equation}
+
+Since \(\boldsymbol{\omega}_d=\omega_s\mathbf{s}\), this can be written as
+\begin{equation}
+\boldsymbol{\omega}_d^T\boldsymbol{\rho}
+=
+\omega_s\rho_s
+\end{equation}
+
+Combining the scalar superspin condition with the vector dynamic-balance
+condition gives the overdetermined linear system
+\begin{equation}
+\begin{bmatrix}
+\boldsymbol{\omega}_d^T\\
+\boldsymbol{\omega}_d^\times
+\end{bmatrix}
+\boldsymbol{\rho}
+=
+\begin{bmatrix}
+\omega_s\rho_s\\
+-\boldsymbol{\omega}_d^\times J\boldsymbol{\omega}_d
+\end{bmatrix}
+\end{equation}
+
+The rotor momentum used in the simulator is the least-squares solution
+\begin{equation}
+\boldsymbol{\rho}
+=
+\arg\min_{\boldsymbol{\rho}}
+\left\|
+A_{\rho}\boldsymbol{\rho}
+-
+\mathbf{b}_{\rho}
+\right\|_2^2 
+\end{equation}
+
+After adding this to the simulation, I calculated the following $\boldsymbol{\rho}$ vector for 10 RPM around the Safe-Mode axis:
+\begin{equation}
+\boxed{
+\boldsymbol{\rho} =
+\begin{bmatrix}
+0.00312083 \\
+-0.00198767 \\
+0.0395601
+\end{bmatrix}\;[\mathrm{kg\,m^2/s}]
+}
+\end{equation}
+
+\section{Spacecraft Dynamics}
+
+The random perturbations were added as described in the homework.
+
+First, compute the nominal inertia eigen-decomposition
+\begin{equation}
+J = VDV^T
+\end{equation}
+
+The principal moments are perturbed by a random fractional vector
+\begin{equation}
+\mathbf d \sim \mathcal N(0,\Sigma_d)
+\end{equation}
+so that
+\begin{equation}
+\tilde D
+=
+D\left(I+\operatorname{diag}(\mathbf d)\right)
+\end{equation}
+
+The principal axes are perturbed by a small random rotation vector
+\begin{equation}
+\boldsymbol{\eta}\sim \mathcal N(0,\Sigma_\eta)
+\end{equation}
+
+Using the skew-symmetric matrix
+\begin{equation}
+\boldsymbol{\eta}^{\times}
+=
+\begin{bmatrix}
+0 & -\eta_3 & \eta_2\\
+\eta_3 & 0 & -\eta_1\\
+-\eta_2 & \eta_1 & 0
+\end{bmatrix},
+\end{equation}
+the perturbed principal-axis matrix is
+\begin{equation}
+\tilde V
+=
+V\exp\left(\boldsymbol{\eta}^{\times}\right)
+\end{equation}
+
+The perturbed inertia matrix is then
+\begin{equation}
+\tilde J
+=
+\tilde V\tilde D\tilde V^T
+\end{equation}
+
+For numerical symmetry, the simulation has this additional step:
+\begin{equation}
+\tilde J
+\leftarrow
+\frac{1}{2}
+\left(
+\tilde J+\tilde J^T
+\right)
+\end{equation}
+
+\begin{figure}[H]
+  \centering
+  \makebox[\textwidth][c]{%
+    \begin{subfigure}[t]{0.4\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/momentum_sphere_spin_stable.png}}
+      \caption{Lower perturbation safe-mode axis.}
+      \label{fig:hw2-momentum-sphere-spin-stable}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.4\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/momentum_sphere.png}}
+      \caption{Higher perturbation safe-mode axis.}
+      \label{fig:hw2-momentum-sphere-nutation}
+    \end{subfigure}%
+  }
+  \caption{Momentum-sphere rotation around safe-mode.}
+  \label{fig:hw2-momentum-sphere-safe-mode}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.65\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_plot.png}}
+  \caption{Safe-Mode 10 Minute Full-Simulation}
+  \label{fig:hw2-sim-plot}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.65\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_sun_safe_mode_axis.png}}
+  \caption{Safe-Mode Attitude Error}
+  \label{fig:hw2-sun-safe-mode-axis}
+\end{figure}
+
+
+
+\footnotetext{The momentum-sphere has a color gradient representing the rotational kinetic energy~\cite{markley2014fundamentals}. For a gyrostat, the total body-frame angular momentum is
+Since \(\boldsymbol{\omega}=J^{-1}(\mathbf h_B-\boldsymbol{\rho})\), the
+rigid-body kinetic energy for a fixed angular-momentum magnitude is
+\[
+T
+=
+\frac{1}{2}
+\mathbf h^T
+J^{-1}
+\mathbf h 
+\]
+}
+\clearpage
+\section{Attitude Sensors}
+
+ARGUS uses a Bosch BMX160 IMU~\cite{bosch2018bmx160} that contains an accelerometer, gyroscope, and magnetometer, a set of OPT4003 photodiode sun sensors~\cite{ti_opt4003q1_2026} for sunpointing, and a suite of Arducam (IMX708) visual-band cameras~\cite{arducam_imx708_2026} for relative navigation using landmarks.
+
+In order to generate accurate measurements, several models are used for each of the sensors. For all of these models among many other parts of this simulator, the GNC-Simulation repository~\cite{cmuArgusGncSimulation} was a key influence.\footnote{Many of the simulation tools used for simulating ARGUS have been transferred for this simulator and report, since my original goal was to rewrite the simulator in Python.}
+
+\subsection{BMX160 IMU}
+
+The Bosch BMX160 is a 9-axis IMU. The provided datasheet~\cite{bosch2018bmx160} shows the following characteristics:
+
+\begin{table}[H]
+\centering
+\caption{BMX160 accelerometer measurement characteristics}
+\label{tab:bmx160_accel_specs}
+\begin{tabular}{lll}
+\hline
+Parameter & Value & Units \\
+\hline
+Selectable range & $\pm 2,\ \pm 4,\ \pm 8,\ \pm 16$ & $g$ \\
+Resolution & 16 & bit \\
+Sensitivity at $\pm 2g$ & 16384 & LSB/$g$ \\
+Sensitivity at $\pm 4g$ & 8192 & LSB/$g$ \\
+Sensitivity at $\pm 8g$ & 4096 & LSB/$g$ \\
+Sensitivity at $\pm 16g$ & 2048 & LSB/$g$ \\
+Zero-$g$ offset, component level & $\pm 25$ & mg \\
+Zero-$g$ offset, board level & $\pm 40$ & mg \\
+Zero-$g$ offset, lifetime & $\pm 150$ & mg \\
+Zero-$g$ offset temperature drift & $\pm 1.0$ & mg/K \\
+Nonlinearity & $\pm 0.5$ & \%FS \\
+Noise density & 180 & $\mu g/\sqrt{\mathrm{Hz}}$ \\
+RMS noise, ODR 200 Hz, 80 Hz filter & 1.8 & mg-rms \\
+Cross-axis sensitivity & 1 & \% \\
+Alignment error & $\pm 0.5$ & deg \\
+Output data rate & 12.5--1600 & Hz \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{BMX160 gyroscope measurement characteristics}
+\label{tab:bmx160_gyro_specs}
+\begin{tabular}{lll}
+\hline
+Parameter & Value & Units \\
+\hline
+Selectable range & $\pm 125,\ \pm 250,\ \pm 500,\ \pm 1000,\ \pm 2000$ & deg/s \\
+Sensitivity at $\pm 2000$ deg/s & 16.4 & LSB/(deg/s) \\
+Sensitivity at $\pm 1000$ deg/s & 32.8 & LSB/(deg/s) \\
+Sensitivity at $\pm 500$ deg/s & 65.6 & LSB/(deg/s) \\
+Sensitivity at $\pm 250$ deg/s & 131.2 & LSB/(deg/s) \\
+Sensitivity at $\pm 125$ deg/s & 262.4 & LSB/(deg/s) \\
+Zero-rate offset & $\pm 3$ & deg/s \\
+Zero-rate offset temperature drift & 0.05 & deg/s/K \\
+Noise density & 0.007 & deg/s$/\sqrt{\mathrm{Hz}}$ \\
+RMS noise, ODR 200 Hz, 74.6 Hz filter & 0.07 & deg/s-rms \\
+Bias stability & 3 & deg/hr \\
+Cross-axis sensitivity & 2 & \% \\
+Output data rate & 25--3200 & Hz \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{BMX160 magnetometer measurement characteristics}
+\label{tab:bmx160_mag_specs}
+\begin{tabular}{lll}
+\hline
+Parameter & Value & Units \\
+\hline
+Magnetic field range, $x/y$ axes & $\pm 1300$ & $\mu$T \\
+Magnetic field range, $z$ axis & $\pm 2500$ & $\mu$T \\
+Device resolution & 0.3 & $\mu$T \\
+Gain error after compensation & $\pm 2$ & \% \\
+Sensitivity temperature drift & $\pm 0.01$ & \%/K \\
+Zero-$B$ offset & $\pm 40$ & $\mu$T \\
+Zero-$B$ offset after calibration & $\pm 2$ & $\mu$T \\
+Full-scale nonlinearity & 1 & \%FS \\
+Output noise, low-power preset, $x/y/z$ & $1.0/1.0/1.4$ & $\mu$T-rms \\
+Output noise, regular preset, $x/y/z$ & $0.6/0.6/0.6$ & $\mu$T-rms \\
+Output noise, enhanced regular preset & $0.5/0.5/0.5$ & $\mu$T-rms \\
+Output noise, high-accuracy preset & $0.3/0.3/0.3$ & $\mu$T-rms \\
+Recommended ODR, forced mode & 12.5 & Hz \\
+\hline
+\end{tabular}
+\end{table}
+
+The accelerometer is completely unused in the simulation, but is configurable. 
+
+According to the datasheet, the noise of the gyro in deg/s should have a variance around $0.07^2$ or $1.49 * 10^{-6}$ deg/s. Similarly, the magnetometer should have a noise variance of $1.4^2$ or $1.96$ $\mu$T. 
+
+In practice, this is not the case. Both of these numbers are substantially lower than the true measured output my sample BMX160. 
+
+To get a better representation, I collected 14 hours worth of data and calculated the actual covariance and bias of the IMU using \texttt{allantools}.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/imu_sensor_plot.png}}
+  \caption{Raw BMX160 IMU measurement time series used for noise characterization.}
+  \label{fig:imu-sensor-plot}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/imu_allan_deviation.png}}
+  \caption{Allan deviation computed from the BMX160 IMU data using \texttt{allantools}.}
+  \label{fig:imu-allan-deviation}
+\end{figure}
+
+\clearpage
+The measured covariance and biases was as follows:
+
+\begin{center}
+\textbf{Gyroscope}
+\end{center}
+\begin{align}
+f_g &= > 25.0~\mathrm{Hz}, \\
+b_g &=
+\begin{bmatrix}
+0.004 \\
+0.003 \\
+0.0008
+\end{bmatrix}
+~\mathrm{rad/s},
+\end{align}
+\begin{equation}
+R_g =
+\begin{bmatrix}
+2.55133216013\times 10^{-7} & 1.248810858\times 10^{-8} & 1.73119113409\times 10^{-8} \\
+1.248810858\times 10^{-8} & 1.63402081184\times 10^{-7} & 5.20736207649\times 10^{-10} \\
+1.73119113409\times 10^{-8} & 5.20736207649\times 10^{-10} & 1.54844505556\times 10^{-7}
+\end{bmatrix}
+~(\mathrm{rad/s})^2 
+\end{equation}
+
+
+\begin{center}
+\textbf{Magnetometer}
+\end{center}
+\begin{align}f_m &= 12.5~\mathrm{Hz}, \\
+b_m &=
+\begin{bmatrix}
+16.2709815383 \\
+95.4802525636 \\
+-12.6296260353
+\end{bmatrix}
+~\mu\mathrm{T},
+\end{align}
+\begin{equation}
+R_m =
+\begin{bmatrix}
+5.47678999806 & 1.11960431476 & 0.151622883711 \\
+1.11960431476 & 1.20637910543 & 0.0291750864857 \\
+0.151622883711 & 0.0291750864857 & 0.15363690581
+\end{bmatrix}
+~\mu\mathrm{T}^2 
+\end{equation}
+
+While the gyro and magnetometer can update at much higher frequencies, setting the output to 10-5 Hz causes the simulator to slow down dramatically, especially so for the magnetometer since the measurement model (discussed later) samples the IGRF-14 model~\cite{iaga2024igrf14}.
+
+Lastly, the bias for the gyro is not constant. The datasheet claims a random walk of $3$ deg/hr, which is roughly $1.45 * 10^{-5}$ rad/s. This is set as the default random-walk value for all three-axis.
+
+\subsection{Magnetic Field Model}
+
+The magnetic field model is generated using the IGRF-14 model~\cite{iaga2024igrf14}.
+
+
+\subsection{OPT4003 Sun Sensor}
+
+In the simulation, the OPT4003 Sun Sensors used on ARGUS are abstracted to instead give a bearing vector output instead of light intensity. A conservative estimate to how it will perform is $\sigma_{\theta} \approx 5^{\circ}$. It is set to have an update frequency of $0.1$ Hz.
+
+
+\subsection{Sun Model}
+
+The Sun model uses JPL/NAIF SPICE (via a Python interface)~\cite{naifSpiceToolkit} as well as a Montenbruck--Gill conical shadow model~\cite{montenbruck2000satelliteOrbits} to allow for eclipse effects to be generated.
+
+The Montenbruck--Gill conical shadow model is defined as so:
+
+\(\mathbf r_E\) is defined as the vector from the Earth center to the spacecraft, and
+\(\mathbf r_S\) is defined as the vector from the Sun to the spacecraft. Define
+\begin{equation}
+r = \|\mathbf r_E\|,
+\qquad
+d = \|\mathbf r_S\|
+\end{equation}
+
+The angular radii of the Sun and Earth are
+\begin{equation}
+a =
+\sin^{-1}
+\left(
+\frac{R_{\odot}}{d}
+\right),
+\qquad
+b =
+\sin^{-1}
+\left(
+\frac{R_E}{r}
+\right),
+\end{equation}
+where \(R_{\odot}\) is the Sun radius and \(R_E\) is the Earth radius.
+
+The angular separation between the apparent Sun center and Earth center is
+\begin{equation}
+c =
+\cos^{-1}
+\left(
+\frac{\mathbf r_E^T\mathbf r_S}
+{\|\mathbf r_E\|\|\mathbf r_S\|}
+\right)
+\end{equation}
+
+For the penumbra case, define
+\begin{equation}
+x =
+\frac{c^2+a^2-b^2}{2c}
+\end{equation}
+and
+\begin{equation}
+y =
+\sqrt{a^2-x^2}
+\end{equation}
+
+The overlap area between the apparent solar disk and the apparent Earth disk is
+\begin{equation}
+A_{\mathrm{overlap}}
+=
+a^2\cos^{-1}\left(\frac{x}{a}\right)
++
+b^2\cos^{-1}\left(\frac{c-x}{b}\right)
+-
+cy.
+\end{equation}
+
+The illumination 'fraction' is then
+\begin{equation}
+\nu =
+\begin{cases}
+0,
+&
+r \le R_E,\\[6pt]
+1,
+&
+a+b \le c,\\[6pt]
+0,
+&
+c < b-a,\\[6pt]
+1-
+\dfrac{A_{\mathrm{overlap}}}{\pi a^2},
+&
+\text{otherwise}.
+\end{cases}
+\end{equation}
+
+\subsection{ArduCam 3 Cameras}
+
+Similarly to the Sun Sensor, the ArduCam 3 module is abstracted to give a bearing vector output. The role of the cameras is to take photos of landmarks and perform inference using vision models. As a result, the update rate for the cameras are arbitrarily set to $0.01$ Hz as it is unreasonable to have a high update rate for these measurements. However, the resolution of the images is high, with the bounding-boxes around many landmarks being small relative to $75^{\circ}$ F.o.V. Assuming a $10$ km error when nadir pointing, this gives $~0.5^{\circ}$ pointing accuracy, which is signficantly higher than that of the coarse Sun Sensor.
+
+\subsection{Earth-Camera Model}
+
+The Earth-Image-Capture Model is currently defined in the code as a bearing measurement from the satellite to a target within some accuracy. In the future, targets will be defined in ECEF and measurements will only be taken if the satellite passes overhead. But currently, the model is simply constrained periodically only.
+
+\subsection{Bearing-Vector Noise Sampling}
+
+To add noise to the bearing-vector measurements, the noise covariance is defined using a simple orthogonal projection of Gaussian, isotropic noise (consistent with standard two-vector attitude-determination measurement models)~\cite{markley1998twoVector}:
+
+\begin{equation}
+W_b
+=
+\sigma_\theta^2
+\left(
+I_3-\mathbf b\mathbf b^T
+\right)
+\end{equation}
+
+The variance $\sigma_{\theta}^2$ is set in the \texttt{config.yaml} file.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.90\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_sensors.png}}
+  \caption{Sensor measurements over 20 minute simulation.}
+  \label{fig:hw2-simulation-sensors}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.90\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/18_orbit_simulation_sensors.png}}
+  \caption{Sensor measurements over an 18-orbit simulation in safe-mode.}
+  \label{fig:hw2-18-orbit-sensors}
+\end{figure}
+
+\clearpage
+\section{Wahba's Problem}
+
+In class, Wahba's Problem was solved three ways: Singular-Value Decomposition (SVD), the q-Method, and Semi-Definite Programming (SDP). In my simulator I have implemented the SVD and SDP methods.
+
+\subsubsection{SVD Wahba Solution}
+
+Given body-frame measurements \(\mathbf b_i\) and inertial reference vectors
+\(\mathbf r_i\), first normalize each vector:
+\begin{equation}
+\hat{\mathbf b}_i =
+\frac{\mathbf b_i}{\|\mathbf b_i\|},
+\qquad
+\hat{\mathbf r}_i =
+\frac{\mathbf r_i}{\|\mathbf r_i\|}
+\end{equation}
+
+Stack the measurements as rows:
+\begin{equation}
+B_{\mathrm{body}}
+=
+\begin{bmatrix}
+\hat{\mathbf b}_1^T\\
+\hat{\mathbf b}_2^T\\
+\vdots\\
+\hat{\mathbf b}_N^T
+\end{bmatrix},
+\qquad
+R_{\mathrm{ref}}
+=
+\begin{bmatrix}
+\hat{\mathbf r}_1^T\\
+\hat{\mathbf r}_2^T\\
+\vdots\\
+\hat{\mathbf r}_N^T
+\end{bmatrix}
+\end{equation}
+
+The attitude profile matrix is
+\begin{equation}
+A
+=
+B_{\mathrm{body}}^T R_{\mathrm{ref}}
+\end{equation}
+
+Compute the singular value decomposition
+\begin{equation}
+A
+=
+U\Sigma V^T.
+\end{equation}
+
+Define the determinant correction
+\begin{equation}
+M
+=
+\operatorname{diag}
+\left(
+1,\,
+1,\,
+\det(VU^T)
+\right)
+\end{equation}
+
+Thus, the SVD Wahba solution is
+\begin{equation}
+\boxed{
+Q_{\mathrm{SVD}}
+=
+V.TMU^T
+}
+\end{equation}
+where \(Q_{\mathrm{SVD}}\) 
+
+\begin{equation}
+\hat{\mathbf b}_i
+\approx
+Q_{\mathrm{SVD}}\hat{\mathbf r}_i
+\end{equation}
+
+\subsubsection{SDP Wahba Solution}
+
+Using the same attitude profile matrix
+\begin{equation}
+A
+=
+B_{\mathrm{body}}^T R_{\mathrm{ref}},
+\end{equation}
+the constrained optimization form used in the simulator is
+\begin{equation}
+\boxed{
+\begin{aligned}
+Q_{\mathrm{SDP}}
+=
+\arg\max_{Q\in\mathbb R^{3\times 3}}
+\quad
+& \operatorname{tr}(Q^T A)\\
+\text{subject to}
+\quad
+&
+\begin{bmatrix}
+I_3 & Q^T\\
+Q & I_3
+\end{bmatrix}
+\succeq 0 
+\end{aligned}
+}
+\end{equation}
+
+\subsubsection{Simulation}
+
+ARGUS is configured to have three sensors that output bearing-vector measurements. To simulate solving for attitude given the magnetometer, sun-sensor, and camera, monte-carlo campaigns were run with 100 trials.
+
+In the first case, the bearing measurements have no noise. Here the SVD, SDP, and truth align closely. In 100-trials, the maximum error was $0.00^{\circ}$ and the mean was $0.00^{\circ}$ for both the SVD and SDP methods.
+
+In the second case, the measurements have the configured noise. Here the SVD and SDP methods struggle, as the sun-sensor is only accurate to within $~5^{\circ}$. Also, in trials where two-measurements are nearly aligned, the solution is significantly further off. In 100-trials, the maximum error was $~28.3^{\circ}$ and the mean was $10.1^{\circ}$ for both the SVD and SDP methods.
+
+Something to note is that the measurements are weighted with identity when creating the $\boldsymbol{B}$ matrix. Weighting the camera measurement significantly higher would help, but even so the variance from the BMX160 and coarse Sun Sensor is still poor for precise attitude determination with only three measurements at any given timestep.
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[t]{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo.png}}
+    \caption{Monte Carlo results (noise-free measurements).}
+    \label{fig:wahba-mc-clean}
+  \end{subfigure}
+
+  \vspace{0.75em}
+
+  \begin{subfigure}[t]{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_attitudes.png}}
+    \caption{Recovered attitudes (noise-free measurements).}
+    \label{fig:wahba-mc-attitudes-clean}
+  \end{subfigure}
+
+  \caption{Wahba Monte Carlo results (noise-free case).}
+  \label{fig:wahba-mc-noisefree}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[t]{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_noisey.png}}
+    \caption{Monte Carlo results (noisy measurements).}
+    \label{fig:wahba-mc-noisy}
+  \end{subfigure}
+
+  \vspace{0.75em}
+
+  \begin{subfigure}[t]{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_attitudes_noisey.png}}
+    \caption{Recovered attitudes (noisy measurements).}
+    \label{fig:wahba-mc-attitudes-noisy}
+  \end{subfigure}
+
+  \caption{Wahba Monte Carlo results (noisy case).}
+  \label{fig:wahba-mc-noisycase}
+\end{figure}
+
 
 
 \clearpage
