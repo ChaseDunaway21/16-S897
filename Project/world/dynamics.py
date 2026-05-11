@@ -177,23 +177,27 @@ def environmental_acceleration(
     return acceleration_eci
 
 
-def environmental_torque_body(
+def environmental_torque_components_body(
     state: np.ndarray,
     state_index: dict,
     current_time: float,
     environment_model: dict | None = None,
-) -> np.ndarray:
-    """Return external environmental torque about the COM in body coordinates [N m]."""
+) -> dict[str, np.ndarray]:
+    """Return environmental torque components about the COM in body coordinates [N m]."""
+    components = {
+        "gravity_gradient": np.zeros(3, dtype=float),
+        "drag": np.zeros(3, dtype=float),
+        "srp": np.zeros(3, dtype=float),
+    }
     if not environment_model:
-        return np.zeros(3, dtype=float)
+        return components
 
     position = state[state_index["POS_ECI"]]
     velocity = state[state_index["VEL_ECI"]]
     q = state[state_index["ATTITUDE"]]
 
-    torque_body = np.zeros(3, dtype=float)
     if environment_model.get("use_gravity_gradient", False):
-        torque_body += gravity.gravity_gradient_torque_body(
+        components["gravity_gradient"] = gravity.gravity_gradient_torque_body(
             position, q, environment_model["inertia_tensor"]
         )
 
@@ -205,10 +209,10 @@ def environmental_torque_body(
         or surface_normals_body is None
         or surface_centers_body is None
     ):
-        return torque_body
+        return components
 
     if environment_model.get("use_drag", False):
-        torque_body += drag.drag_torque_body(
+        components["drag"] = drag.drag_torque_body(
             position,
             velocity,
             q,
@@ -221,7 +225,7 @@ def environmental_torque_body(
         )
 
     if environment_model.get("use_srp", False):
-        torque_body += srp.srp_torque_body(
+        components["srp"] = srp.srp_torque_body(
             q,
             position,
             current_time,
@@ -232,6 +236,21 @@ def environmental_torque_body(
             sun_model=environment_model.get("sun_model"),
         )
 
+    return components
+
+
+def environmental_torque_body(
+    state: np.ndarray,
+    state_index: dict,
+    current_time: float,
+    environment_model: dict | None = None,
+) -> np.ndarray:
+    """Return total external environmental torque about the COM in body coordinates [N m]."""
+    torque_body = np.zeros(3, dtype=float)
+    for component in environmental_torque_components_body(
+        state, state_index, current_time, environment_model
+    ).values():
+        torque_body += component
     return torque_body
 
 

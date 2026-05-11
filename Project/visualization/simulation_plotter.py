@@ -89,47 +89,6 @@ SENSOR_COLORS = ["#2563eb", "#f97316", "#059669", "#7c3aed"]
 
 
 #################################################################################################
-# ATTITUDE PLOT HELPERS
-#################################################################################################
-
-
-def attitude_plot_values(
-    ctx: SimulationPlotContext, attitudes: np.ndarray
-) -> np.ndarray:
-    attitude_history = np.asarray(attitudes, dtype=float)
-    if ctx.attitude_plot_mode == "quaternion":
-        return attitude_history
-
-    norms = np.linalg.norm(attitude_history, axis=1, keepdims=True)
-    norms[norms == 0.0] = 1.0
-    normalized_attitude = attitude_history / norms
-    return np.rad2deg(
-        np.asarray([quaternion_to_euler(q) for q in normalized_attitude], dtype=float)
-    )
-
-
-def attitude_plot_spec(
-    ctx: SimulationPlotContext, attitudes: np.ndarray
-) -> dict[str, object]:
-    if ctx.attitude_plot_mode == "quaternion":
-        return {
-            "values": attitude_plot_values(ctx, attitudes),
-            "labels": ["q0 [-]", "q1 [-]", "q2 [-]", "q3 [-]"],
-            "colors": ["#6d28d9", "#db2777", "#0ea5e9", "#16a34a"],
-            "title": "Quaternion Components",
-            "filename": "simulation_attitude_quaternion.png",
-        }
-
-    return {
-        "values": attitude_plot_values(ctx, attitudes),
-        "labels": ["roll [deg]", "pitch [deg]", "yaw [deg]"],
-        "colors": ["#6d28d9", "#db2777", "#0ea5e9"],
-        "title": "Euler Angle Components",
-        "filename": "simulation_attitude_euler.png",
-    }
-
-
-#################################################################################################
 # OUTPUT PATHS
 #################################################################################################
 
@@ -231,6 +190,229 @@ def simulation_plot_paths(
 
 
 #################################################################################################
+# ATTITUDE PLOT HELPERS
+#################################################################################################
+
+
+def attitude_plot_values(
+    ctx: SimulationPlotContext, attitudes: np.ndarray
+) -> np.ndarray:
+    attitude_history = np.asarray(attitudes, dtype=float)
+    if ctx.attitude_plot_mode == "quaternion":
+        return attitude_history
+
+    norms = np.linalg.norm(attitude_history, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0
+    normalized_attitude = attitude_history / norms
+    return np.rad2deg(
+        np.asarray([quaternion_to_euler(q) for q in normalized_attitude], dtype=float)
+    )
+
+
+def attitude_plot_spec(
+    ctx: SimulationPlotContext, attitudes: np.ndarray
+) -> dict[str, object]:
+    if ctx.attitude_plot_mode == "quaternion":
+        return {
+            "values": attitude_plot_values(ctx, attitudes),
+            "labels": ["q0 [-]", "q1 [-]", "q2 [-]", "q3 [-]"],
+            "colors": ["#6d28d9", "#db2777", "#0ea5e9", "#16a34a"],
+            "title": "Quaternion Components",
+            "filename": "simulation_attitude_quaternion.png",
+        }
+
+    return {
+        "values": attitude_plot_values(ctx, attitudes),
+        "labels": ["roll [deg]", "pitch [deg]", "yaw [deg]"],
+        "colors": ["#6d28d9", "#db2777", "#0ea5e9"],
+        "title": "Euler Angle Components",
+        "filename": "simulation_attitude_euler.png",
+    }
+
+
+#################################################################################################
+# TVLQR GAIN PLOTS
+#################################################################################################
+
+
+def plot_tvlqr_gain_convergence(
+    time_s: np.ndarray,
+    gain_history: np.ndarray,
+    steady_state_gain: np.ndarray,
+) -> plt.Figure:
+    """Plot nominal TVLQR gain convergence and active gain entries."""
+    time_s = np.asarray(time_s, dtype=float).reshape(-1)
+    gain_history = np.asarray(gain_history, dtype=float)
+    steady_state_gain = np.asarray(steady_state_gain, dtype=float)
+    if gain_history.ndim != 3:
+        raise ValueError("gain_history must have shape (N, n_u, n_x)")
+    if steady_state_gain.shape != gain_history.shape[1:]:
+        raise ValueError("steady_state_gain must have shape (n_u, n_x)")
+    if time_s.size != gain_history.shape[0]:
+        raise ValueError("time_s length must match gain_history length")
+
+    # Plot distance from each stored Riccati gain to the nominal fixed-point
+    # gain computed by the extra post-history Riccati update.
+    error = np.linalg.norm(gain_history - steady_state_gain, axis=(1, 2))
+
+    # Avoid drawing exact zeros as artificial 1e-308 cliffs on a log axis.
+    error[error <= 0.0] = np.nan
+    finite_error = error[np.isfinite(error)]
+    fig, (ax, k_ax) = plt.subplots(
+        2,
+        1,
+        figsize=(12, 8),
+        facecolor=FIGURE_FACE_COLOR,
+        sharex=True,
+        gridspec_kw={"height_ratios": [1.0, 1.4]},
+    )
+    ax.plot(time_s, error, color="#2563eb", linewidth=1.4)
+    if finite_error.size:
+        ax.set_yscale("log")
+    ax.set_title("Nominal TVLQR Gain Convergence")
+    ax.set_ylabel("||K_k - K_ss||_F")
+    style_time_axis(ax)
+
+    default_labels = [
+        "phi_x",
+        "phi_y",
+        "phi_z",
+        "omega_x",
+        "omega_y",
+        "omega_z",
+    ]
+    state_labels = default_labels + [f"r_{i + 1}" for i in range(3)]
+    if gain_history.shape[2] > len(state_labels):
+        state_labels.extend(
+            f"x_{i + 1}" for i in range(len(state_labels), gain_history.shape[2])
+        )
+    state_labels = state_labels[: gain_history.shape[2]]
+
+    max_abs_gain = np.max(np.abs(gain_history), axis=0)
+    active_entries = np.argwhere(max_abs_gain > 1e-14)
+    if active_entries.size == 0:
+        active_entries = np.argwhere(np.ones_like(max_abs_gain, dtype=bool))
+    for control_index, state_index in active_entries:
+        label = f"K[{control_index + 1},{state_labels[state_index]}]"
+        k_ax.plot(
+            time_s,
+            gain_history[:, control_index, state_index],
+            linewidth=1.0,
+            label=label,
+        )
+
+    k_ax.set_title("Nominal TVLQR Gain Over Time")
+    k_ax.set_xlabel("Time [s]")
+    k_ax.set_ylabel("K")
+    style_time_axis(k_ax)
+    if time_s.size:
+        k_ax.set_xlim(left=0.0)
+    if active_entries.shape[0] <= 18:
+        k_ax.legend(loc="best", fontsize=8, ncol=3)
+    else:
+        k_ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.22),
+            fontsize=7,
+            ncol=4,
+        )
+
+    fig.tight_layout()
+    return fig
+
+
+def save_tvlqr_gain_convergence_plot(
+    logger: logging.Logger,
+    save_path: str | Path,
+    time_s: np.ndarray,
+    gain_history: np.ndarray,
+    steady_state_gain: np.ndarray,
+) -> Path:
+    """Save the TVLQR nominal gain convergence plot."""
+    fig = plot_tvlqr_gain_convergence(time_s, gain_history, steady_state_gain)
+    try:
+        return save_figure(
+            logger,
+            fig,
+            save_path,
+            "TVLQR nominal gain convergence plot saved",
+        )
+    finally:
+        plt.close(fig)
+
+
+#################################################################################################
+# ENVIRONMENTAL TORQUE PLOTS
+#################################################################################################
+
+
+def accumulated_environmental_torque(
+    times: np.ndarray, environmental_torque_nm: np.ndarray
+) -> np.ndarray:
+    """Return cumulative environmental torque impulse in body coordinates [N m s]."""
+    times = np.asarray(times, dtype=float)
+    torque = np.asarray(environmental_torque_nm, dtype=float)
+    if times.size == 0 or torque.size == 0:
+        return np.empty((0, 3), dtype=float)
+
+    accumulated = np.zeros_like(torque, dtype=float)
+    if times.size > 1:
+        dt = np.diff(times)[:, np.newaxis]
+        accumulated[1:] = np.cumsum(0.5 * (torque[1:] + torque[:-1]) * dt, axis=0)
+    return accumulated
+
+
+def plot_environmental_torque_figure(
+    times: np.ndarray,
+    environmental_torque_nm: np.ndarray,
+    environmental_component_torques_nm: Mapping[str, np.ndarray] | None = None,
+) -> plt.Figure:
+    component_spec = [("Tx", "#2563eb"), ("Ty", "#f59e0b"), ("Tz", "#14b8a6")]
+    torque_sets: list[tuple[str, np.ndarray]] = [
+        ("Total Environmental Torque", environmental_torque_nm)
+    ]
+    component_labels = (
+        ("gravity_gradient", "Gravity-Gradient Torque"),
+        ("drag", "Aerodynamic Drag Torque"),
+        ("srp", "Solar Radiation Pressure Torque"),
+    )
+    if environmental_component_torques_nm is not None:
+        for key, title in component_labels:
+            torque = np.asarray(
+                environmental_component_torques_nm.get(key, np.empty((0, 3))),
+                dtype=float,
+            )
+            if torque.shape == (times.size, 3):
+                torque_sets.append((title, torque))
+
+    fig_height = max(5.0, 2.4 * len(torque_sets) + 0.5)
+    fig, axes = plt.subplots(
+        len(torque_sets),
+        1,
+        figsize=(12, fig_height),
+        facecolor=FIGURE_FACE_COLOR,
+        sharex=True,
+    )
+    axes = np.atleast_1d(axes)
+
+    for ax, (title, torque) in zip(axes, torque_sets):
+        accumulated = accumulated_environmental_torque(times, torque)
+        magnitude = np.linalg.norm(accumulated, axis=1)
+
+        style_time_axis(ax)
+        for i, (label, color) in enumerate(component_spec):
+            ax.plot(times, accumulated[:, i], label=label, linewidth=1.5, color=color)
+        ax.plot(times, magnitude, label="|T|", linewidth=1.8, color="#0f172a")
+        ax.set_title(f"Accumulated {title}")
+        ax.set_ylabel("impulse [N m s]")
+        ax.legend(loc="best", ncol=4, fontsize=8)
+
+    axes[-1].set_xlabel("time [s]")
+    fig.tight_layout()
+    return fig
+
+
+#################################################################################################
 # TRAJECTORY PLOTS
 #################################################################################################
 
@@ -318,161 +500,6 @@ def plot_orbit_figure(pos_km: np.ndarray) -> plt.Figure:
 
 
 #################################################################################################
-# CAMERA MEASUREMENT PLOTS
-#################################################################################################
-
-
-def camera_measurement_samples(
-    times: np.ndarray,
-    sensor_history: Mapping[str, Mapping[str, object]],
-) -> tuple[np.ndarray, np.ndarray]:
-    camera_data = sensor_history.get("visual_camera")
-    if camera_data is None:
-        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
-
-    camera_times = np.asarray(camera_data["times_s"], dtype=float)
-    camera_measurements = np.asarray(camera_data["measurements"], dtype=float)
-    if camera_times.size == 0 or camera_measurements.size == 0:
-        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
-    if camera_measurements.ndim == 1:
-        camera_measurements = camera_measurements.reshape(1, -1)
-
-    valid = np.isfinite(camera_measurements).all(axis=1)
-    valid_times = camera_times[valid]
-    valid_measurements = camera_measurements[valid]
-    if valid_times.size == 0:
-        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
-
-    indices = np.searchsorted(times, valid_times)
-    indices = np.clip(indices, 0, times.size - 1)
-    previous_indices = np.maximum(indices - 1, 0)
-    use_previous = np.abs(times[previous_indices] - valid_times) < np.abs(
-        times[indices] - valid_times
-    )
-    indices[use_previous] = previous_indices[use_previous]
-    return indices, valid_measurements
-
-
-def plot_camera_measurement_figure(
-    times: np.ndarray,
-    pos_km: np.ndarray,
-    attitudes: np.ndarray,
-    sensor_history: Mapping[str, Mapping[str, object]],
-    target_position_eci_km: np.ndarray,
-) -> plt.Figure | None:
-    measurement_indices, measured_bearings_body = camera_measurement_samples(
-        times, sensor_history
-    )
-    if measurement_indices.size == 0:
-        return None
-
-    max_vectors = 150
-    if measurement_indices.size > max_vectors:
-        selected = np.linspace(0, measurement_indices.size - 1, max_vectors, dtype=int)
-        measurement_indices = measurement_indices[selected]
-        measured_bearings_body = measured_bearings_body[selected]
-
-    camera_positions = pos_km[measurement_indices]
-    camera_attitudes = np.asarray(attitudes, dtype=float)[measurement_indices]
-
-    bearing_norms = np.linalg.norm(measured_bearings_body, axis=1, keepdims=True)
-    bearing_norms[bearing_norms == 0.0] = 1.0
-    measured_bearings_body = measured_bearings_body / bearing_norms
-    measured_directions_eci = np.asarray(
-        [
-            R_body_to_inertial(q) @ bearing_body
-            for q, bearing_body in zip(camera_attitudes, measured_bearings_body)
-        ],
-        dtype=float,
-    )
-    measured_direction_norms = np.linalg.norm(
-        measured_directions_eci, axis=1, keepdims=True
-    )
-    measured_direction_norms[measured_direction_norms == 0.0] = 1.0
-    measured_directions_eci /= measured_direction_norms
-
-    target_km = np.asarray(target_position_eci_km, dtype=float)
-    directions = target_km - camera_positions
-    direction_norms = np.linalg.norm(directions, axis=1, keepdims=True)
-    direction_norms[direction_norms == 0.0] = 1.0
-    unit_directions = directions / direction_norms
-    vector_length = 0.25 * EARTH_RADIUS_KM
-
-    fig = plt.figure(figsize=(10, 9), facecolor=FIGURE_FACE_COLOR)
-    ax = fig.add_subplot(1, 1, 1, projection="3d")
-    ax.set_facecolor(AXIS_FACE_COLOR)
-    plot_earth_sphere(ax, alpha=0.12)
-    ax.plot(
-        pos_km[:, 0],
-        pos_km[:, 1],
-        pos_km[:, 2],
-        linewidth=1.2,
-        color="#f97316",
-        alpha=0.65,
-        label="orbit",
-    )
-    ax.scatter(
-        camera_positions[:, 0],
-        camera_positions[:, 1],
-        camera_positions[:, 2],
-        color="#facc15",
-        edgecolors="#78350f",
-        linewidths=0.5,
-        s=22,
-        label="camera measurement",
-        zorder=4,
-    )
-    ax.quiver(
-        camera_positions[:, 0],
-        camera_positions[:, 1],
-        camera_positions[:, 2],
-        unit_directions[:, 0],
-        unit_directions[:, 1],
-        unit_directions[:, 2],
-        length=vector_length,
-        normalize=False,
-        color="#6b7280",
-        linewidth=0.7,
-        alpha=0.35,
-        label="ideal target bearing",
-    )
-    ax.quiver(
-        camera_positions[:, 0],
-        camera_positions[:, 1],
-        camera_positions[:, 2],
-        measured_directions_eci[:, 0],
-        measured_directions_eci[:, 1],
-        measured_directions_eci[:, 2],
-        length=vector_length,
-        normalize=False,
-        color="#dc2626",
-        linewidth=0.9,
-        alpha=0.85,
-        label="measured bearing",
-    )
-    ax.scatter(
-        target_km[0],
-        target_km[1],
-        target_km[2],
-        color="#111827",
-        edgecolors="white",
-        linewidths=0.7,
-        s=60,
-        label="target",
-        zorder=5,
-    )
-    ax.set_title("Camera Bearing Measurements (ECI)")
-    ax.set_xlabel("x [km]")
-    ax.set_ylabel("y [km]")
-    ax.set_zlabel("z [km]")
-    ax.legend(loc="upper right")
-    extent_points = np.vstack((pos_km, target_km[np.newaxis, :]))
-    set_equal_orbit_axes(ax, orbit_extent_points(extent_points))
-    fig.tight_layout()
-    return fig
-
-
-#################################################################################################
 # STATE COMPONENT PLOTS
 #################################################################################################
 
@@ -486,43 +513,6 @@ def plot_velocity_figure(times: np.ndarray, vel_kms: np.ndarray) -> plt.Figure:
     ax.set_title("Velocity Components")
     ax.set_xlabel("time [s]")
     ax.set_ylabel("velocity [km/s]")
-    ax.legend(loc="best")
-    fig.tight_layout()
-    return fig
-
-
-def accumulated_environmental_torque(
-    times: np.ndarray, environmental_torque_nm: np.ndarray
-) -> np.ndarray:
-    """Return cumulative environmental torque impulse in body coordinates [N m s]."""
-    times = np.asarray(times, dtype=float)
-    torque = np.asarray(environmental_torque_nm, dtype=float)
-    if times.size == 0 or torque.size == 0:
-        return np.empty((0, 3), dtype=float)
-
-    accumulated = np.zeros_like(torque, dtype=float)
-    if times.size > 1:
-        dt = np.diff(times)[:, np.newaxis]
-        accumulated[1:] = np.cumsum(0.5 * (torque[1:] + torque[:-1]) * dt, axis=0)
-    return accumulated
-
-
-def plot_environmental_torque_figure(
-    times: np.ndarray, environmental_torque_nm: np.ndarray
-) -> plt.Figure:
-    accumulated = accumulated_environmental_torque(times, environmental_torque_nm)
-    magnitude = np.linalg.norm(accumulated, axis=1)
-
-    fig, ax = plt.subplots(figsize=(12, 5), facecolor=FIGURE_FACE_COLOR)
-    style_time_axis(ax)
-    for i, (label, color) in enumerate(
-        [("Tx", "#2563eb"), ("Ty", "#f59e0b"), ("Tz", "#14b8a6")]
-    ):
-        ax.plot(times, accumulated[:, i], label=label, linewidth=1.8, color=color)
-    ax.plot(times, magnitude, label="|T|", linewidth=2.0, color="#0f172a")
-    ax.set_title("Accumulated Environmental Torque")
-    ax.set_xlabel("time [s]")
-    ax.set_ylabel("torque impulse [N m s]")
     ax.legend(loc="best")
     fig.tight_layout()
     return fig
@@ -825,6 +815,7 @@ def plot_sensor_measurements(
                 )
             ax.set_title(str(item["title"]))
             ax.set_ylabel(str(item["ylabel"]))
+            ax.set_xlim(left=0.0)
             ax.legend(loc="best")
         axes_array[-1].set_xlabel("time [s]")
         fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
@@ -856,11 +847,167 @@ def plot_sensor_measurements(
                 color=SENSOR_COLORS[i % len(SENSOR_COLORS)],
             )
             ax.set_ylabel(labels[i])
+            ax.set_xlim(left=0.0)
             if i == 0:
                 ax.set_title(str(item["title"]))
             row += 1
     axes_array[-1].set_xlabel("time [s]")
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    return fig
+
+
+#################################################################################################
+# CAMERA MEASUREMENT PLOTS
+#################################################################################################
+
+
+def camera_measurement_samples(
+    times: np.ndarray,
+    sensor_history: Mapping[str, Mapping[str, object]],
+) -> tuple[np.ndarray, np.ndarray]:
+    camera_data = sensor_history.get("visual_camera")
+    if camera_data is None:
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
+
+    camera_times = np.asarray(camera_data["times_s"], dtype=float)
+    camera_measurements = np.asarray(camera_data["measurements"], dtype=float)
+    if camera_times.size == 0 or camera_measurements.size == 0:
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
+    if camera_measurements.ndim == 1:
+        camera_measurements = camera_measurements.reshape(1, -1)
+
+    valid = np.isfinite(camera_measurements).all(axis=1)
+    valid_times = camera_times[valid]
+    valid_measurements = camera_measurements[valid]
+    if valid_times.size == 0:
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
+
+    indices = np.searchsorted(times, valid_times)
+    indices = np.clip(indices, 0, times.size - 1)
+    previous_indices = np.maximum(indices - 1, 0)
+    use_previous = np.abs(times[previous_indices] - valid_times) < np.abs(
+        times[indices] - valid_times
+    )
+    indices[use_previous] = previous_indices[use_previous]
+    return indices, valid_measurements
+
+
+def plot_camera_measurement_figure(
+    times: np.ndarray,
+    pos_km: np.ndarray,
+    attitudes: np.ndarray,
+    sensor_history: Mapping[str, Mapping[str, object]],
+    target_position_eci_km: np.ndarray,
+) -> plt.Figure | None:
+    measurement_indices, measured_bearings_body = camera_measurement_samples(
+        times, sensor_history
+    )
+    if measurement_indices.size == 0:
+        return None
+
+    max_vectors = 150
+    if measurement_indices.size > max_vectors:
+        selected = np.linspace(0, measurement_indices.size - 1, max_vectors, dtype=int)
+        measurement_indices = measurement_indices[selected]
+        measured_bearings_body = measured_bearings_body[selected]
+
+    camera_positions = pos_km[measurement_indices]
+    camera_attitudes = np.asarray(attitudes, dtype=float)[measurement_indices]
+
+    bearing_norms = np.linalg.norm(measured_bearings_body, axis=1, keepdims=True)
+    bearing_norms[bearing_norms == 0.0] = 1.0
+    measured_bearings_body = measured_bearings_body / bearing_norms
+    measured_directions_eci = np.asarray(
+        [
+            R_body_to_inertial(q) @ bearing_body
+            for q, bearing_body in zip(camera_attitudes, measured_bearings_body)
+        ],
+        dtype=float,
+    )
+    measured_direction_norms = np.linalg.norm(
+        measured_directions_eci, axis=1, keepdims=True
+    )
+    measured_direction_norms[measured_direction_norms == 0.0] = 1.0
+    measured_directions_eci /= measured_direction_norms
+
+    target_km = np.asarray(target_position_eci_km, dtype=float)
+    directions = target_km - camera_positions
+    direction_norms = np.linalg.norm(directions, axis=1, keepdims=True)
+    direction_norms[direction_norms == 0.0] = 1.0
+    unit_directions = directions / direction_norms
+    vector_length = 0.25 * EARTH_RADIUS_KM
+
+    fig = plt.figure(figsize=(10, 9), facecolor=FIGURE_FACE_COLOR)
+    ax = fig.add_subplot(1, 1, 1, projection="3d")
+    ax.set_facecolor(AXIS_FACE_COLOR)
+    plot_earth_sphere(ax, alpha=0.12)
+    ax.plot(
+        pos_km[:, 0],
+        pos_km[:, 1],
+        pos_km[:, 2],
+        linewidth=1.2,
+        color="#f97316",
+        alpha=0.65,
+        label="orbit",
+    )
+    ax.scatter(
+        camera_positions[:, 0],
+        camera_positions[:, 1],
+        camera_positions[:, 2],
+        color="#facc15",
+        edgecolors="#78350f",
+        linewidths=0.5,
+        s=22,
+        label="camera measurement",
+        zorder=4,
+    )
+    ax.quiver(
+        camera_positions[:, 0],
+        camera_positions[:, 1],
+        camera_positions[:, 2],
+        unit_directions[:, 0],
+        unit_directions[:, 1],
+        unit_directions[:, 2],
+        length=vector_length,
+        normalize=False,
+        color="#6b7280",
+        linewidth=0.7,
+        alpha=0.35,
+        label="ideal target bearing",
+    )
+    ax.quiver(
+        camera_positions[:, 0],
+        camera_positions[:, 1],
+        camera_positions[:, 2],
+        measured_directions_eci[:, 0],
+        measured_directions_eci[:, 1],
+        measured_directions_eci[:, 2],
+        length=vector_length,
+        normalize=False,
+        color="#dc2626",
+        linewidth=0.9,
+        alpha=0.85,
+        label="measured bearing",
+    )
+    ax.scatter(
+        target_km[0],
+        target_km[1],
+        target_km[2],
+        color="#111827",
+        edgecolors="white",
+        linewidths=0.7,
+        s=60,
+        label="target",
+        zorder=5,
+    )
+    ax.set_title("Camera Bearing Measurements (ECI)")
+    ax.set_xlabel("x [km]")
+    ax.set_ylabel("y [km]")
+    ax.set_zlabel("z [km]")
+    ax.legend(loc="upper right")
+    extent_points = np.vstack((pos_km, target_km[np.newaxis, :]))
+    set_equal_orbit_axes(ax, orbit_extent_points(extent_points))
+    fig.tight_layout()
     return fig
 
 
@@ -1003,7 +1150,6 @@ def plot_estimator_figure(
             truth_q[:, i],
             color=q_colors[i],
             linewidth=1.5,
-            linestyle="--",
             alpha=0.8,
             label=f"true {label}",
         )
@@ -1012,6 +1158,7 @@ def plot_estimator_figure(
             est_q[:, i],
             color=q_colors[i],
             linewidth=1.4,
+            linestyle="--",
             label=f"est {label}",
         )
     axes[0].set_title("Attitude Quaternion Mean vs Truth")
@@ -1388,8 +1535,15 @@ def plot_simulation(
     if isinstance(torque_history, Mapping) and "environmental" in torque_history:
         environmental_torque = np.asarray(torque_history["environmental"], dtype=float)
         if environmental_torque.shape == (times.size, 3):
+            environmental_component_torques = {}
+            for key in ("gravity_gradient", "drag", "srp"):
+                torque = np.asarray(
+                    torque_history.get(key, np.empty((0, 3))), dtype=float
+                )
+                if torque.shape == (times.size, 3):
+                    environmental_component_torques[key] = torque
             environmental_torque_fig = plot_environmental_torque_figure(
-                times, environmental_torque
+                times, environmental_torque, environmental_component_torques
             )
 
     gyro_mag_torque_fig = None

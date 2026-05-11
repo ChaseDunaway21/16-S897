@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 from scipy.linalg import expm
 
 from world.math_utils import matrix_from_config, skew_symmetric
 from world.rotations_and_transformations import (
+    L,
     short_quaternion,
     normalize_quaternion,
     quaternion_multiply,
@@ -416,11 +415,8 @@ class ReactionWheelTVLQRController:
         wheel_momentum_ref: np.ndarray,
     ) -> np.ndarray:
         error = np.empty(self.state_size)
-        error[:3] = 0.5 * rotation_vector_from_quaternion(
-            quaternion_multiply(
-                quaternion_conjugate(q_ref), state[state_index["ATTITUDE"]]
-            )
-        )
+        q_error = short_quaternion(L(q_ref).T @ state[state_index["ATTITUDE"]])
+        error[:3] = q_error[1:4]
         error[3:6] = state[state_index["ATTITUDE_RATE"]] - omega_ref
         error[6:] = (
             self._wheel_momentum_coordinates(state[state_index["RHO"]])
@@ -455,68 +451,6 @@ class ReactionWheelTVLQRController:
         u = wheel_rate_ref - self._gain(elapsed) @ delta_x
         body_torque = -self.wheel_axes_body @ u
         return self._body_torque_to_wheel_command(body_torque, actuator_model)
-
-    def save_gain_convergence_plot(self, path: str | Path) -> Path:
-        import matplotlib.pyplot as plt
-
-        path = Path(path)
-        time_s = np.arange(self.K_nominal_history.shape[0]) * self.lqr_dt_s
-
-        # Plot distance from each stored Riccati gain to the nominal fixed-point
-        # gain computed by the extra post-history Riccati update.
-        error = np.linalg.norm(self.K_nominal_history - self.K_nominal, axis=(1, 2))
-
-        # Avoid drawing exact zeros as artificial 1e-308 cliffs on a log axis.
-        error[error <= 0.0] = np.nan
-        finite_error = error[np.isfinite(error)]
-        fig, (ax, k_ax) = plt.subplots(
-            2,
-            1,
-            figsize=(12, 8),
-            sharex=True,
-            gridspec_kw={"height_ratios": [1.0, 1.4]},
-        )
-        ax.plot(time_s, error, color="#2563eb", linewidth=1.4)
-        if finite_error.size:
-            ax.set_yscale("log")
-        ax.set_title("Nominal TVLQR Gain Convergence")
-        ax.set_ylabel("||K_k - K_ss||_F")
-        ax.grid(True, alpha=0.35, linestyle="--", linewidth=0.7)
-
-        state_labels = ["phi_x", "phi_y", "phi_z", "omega_x", "omega_y", "omega_z"] + [
-            f"r_{i + 1}" for i in range(3)
-        ]
-        max_abs_gain = np.max(np.abs(self.K_nominal_history), axis=0)
-        active_entries = np.argwhere(max_abs_gain > 1e-14)
-        if active_entries.size == 0:
-            active_entries = np.argwhere(np.ones_like(max_abs_gain, dtype=bool))
-        for control_index, state_index in active_entries:
-            label = f"K[{control_index + 1},{state_labels[state_index]}]"
-            k_ax.plot(
-                time_s,
-                self.K_nominal_history[:, control_index, state_index],
-                linewidth=1.0,
-                label=label,
-            )
-
-        k_ax.set_title("Nominal TVLQR Gain Entries")
-        k_ax.set_xlabel("nominal DARE time [s]")
-        k_ax.set_ylabel("K_k entries")
-        k_ax.grid(True, alpha=0.35, linestyle="--", linewidth=0.7)
-        if active_entries.shape[0] <= 18:
-            k_ax.legend(loc="best", fontsize=8, ncol=3)
-        else:
-            k_ax.legend(
-                loc="upper center",
-                bbox_to_anchor=(0.5, -0.22),
-                fontsize=7,
-                ncol=4,
-            )
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        return path
 
 
 class MagnetorquerOnlyController:

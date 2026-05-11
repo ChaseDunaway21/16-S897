@@ -2,10 +2,11 @@
 
 from .momentum import plot_momentum_sphere
 from .monte_carlo import plot_monte_carlo_trials
-from .simulation_plotter import plot_simulation
+from .simulation_plotter import plot_simulation, save_tvlqr_gain_convergence_plot
 
 __all__ = [
     "plot_momentum_sphere",
     "plot_monte_carlo_trials",
     "plot_simulation",
+    "save_tvlqr_gain_convergence_plot",
 ]

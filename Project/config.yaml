@@ -8,10 +8,10 @@ simulation_properties:
     value: False
 
   - name: time_step
-    value: 0.1 # seconds
+    value: 0.5 # seconds
 
   - name: max_simulation_time
-    value: 1000.0 # seconds
+    value: 3000.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -43,7 +43,7 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: random  #[-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
+    value: [0.7071067811865475,0,0,0.7071067811865475]  #[-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
 
   - name: attitude_rate
     value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
@@ -187,7 +187,7 @@ physical_properties:
 inertia_properties:
 
   - name: augment_inertia
-    value: True
+    value: False
 
   - name: inertia_seed
     value: 42
@@ -210,7 +210,7 @@ integration_properties:
     value: rk4
 
 environment_properties:
-  enabled: False
+  enabled: True
   use_drag: True
   use_srp: True
   use_gravity_gradient: True
@@ -223,7 +223,7 @@ environment_properties:
   reference_area_m2: 0.01 # This 'reference' area is an assumed effective area, it's only used if use_surface_geometry is False
 
 actuator_properties:
-  enabled: False
+  enabled: True
 
   reaction_wheel:
     enabled: True
@@ -233,10 +233,14 @@ actuator_properties:
       - [1.0, 0.0, 0.0]
       - [0.0, 1.0, 0.0]
       - [0.0, 0.0, 1.0]
+    wheel_positions_body: # m, one [x, y, z] row per wheel; metadata only unless mass/force effects are modeled
+      - [0.9, 0.9, 0.9]
+      - [0.9, 0.9, 0.9]
+      - [0.9, 0.9, 0.9]
     wheel_speeds: [0.0, 0.0, 0.0]
 
 controller_properties:
-  enabled: False
+  enabled: True
   type: reaction_wheel_tvlqr # reaction_wheel_tvlqr or magnetorquer_only
   update_rate_hz: 0.0 # <= 0 updates every integration step
 
@@ -244,9 +248,9 @@ controller_properties:
     target_attitude: [1.0, 0.0, 0.0, 0.0] # [q0, q1, q2, q3]
     target_rate_body: [0.0, 0.0, 0.0] # rad/s
     use_eigen_slew: True # True tracks an eigen-slew; False regulates directly to target_attitude
-    slew_duration_s: 300.0
+    slew_duration_s: 2500.0
     lqr_dt_s: 0.1 # 10 Hz TVLQR/control discretization
-    nominal_gain_steps: 54000
+    nominal_gain_steps: 10000
     plot_gain_convergence: True
     Q_diagonal: [400.0, 400.0, 400.0, 10000.0, 10000.0, 10000.0, 1.7e6, 1.7e6, 1.7e6]
     R_diagonal: [1.889e9, 1.889e9, 1.889e9]
@@ -314,8 +318,8 @@ estimator_properties:
   sigma_sunsensor_direction: 0.1745 # rad, 0.1745 is roughly 10 degrees
   sigma_magnetometer_direction: 0.1 # rad
   initial_gyro_bias: [0.0, 0.0, 0.0] # rad/s
-  initial_attitude: random # [q0, q1, q2, q3], truth, random, or random_unit
-  initial_attitude_random_sigma: 1.8 # rad, used when initial_attitude is random
+  initial_attitude: wahba # [q0, q1, q2, q3], truth, wahba, random, or random_unit
+  initial_attitude_random_sigma: 0.5 # rad, used when initial_attitude is random
   initial_attitude_seed: 42
 
 plotting_properties:
@@ -363,4 +367,7 @@ plotting_properties:
     value: True
 
   - name: show_momentum_sphere_plot
+    value: True
+
+  - name: show_tvlqr_gain_convergence_plot
     value: True

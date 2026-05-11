@@ -19,6 +19,7 @@ from visualization import (
     plot_momentum_sphere as build_momentum_sphere_plot,
     plot_monte_carlo_trials as build_monte_carlo_plots,
     plot_simulation as build_simulation_plots,
+    save_tvlqr_gain_convergence_plot,
 )
 from world.controller import MagnetorquerOnlyController, ReactionWheelTVLQRController
 from world.estimator import MEKF
@@ -30,7 +31,7 @@ from world.rotations_and_transformations import (
 from world.models.constants import MU_EARTH
 from world.dynamics import (
     environmental_acceleration,
-    environmental_torque_body,
+    environmental_torque_components_body,
     integrate_dynamics,
 )
 import world.models.gravity as gravity
@@ -85,10 +86,17 @@ class Simulator:
         if (not monte_carlo_enabled) and (not ideal_enabled):
             base_seed = int(mc_item.get("seed", 42))
             self.single_run_seed = base_seed
+            plotting_properties = self.cfg.get("plotting_properties", []) or []
+            allow_controller_diagnostic_plots = self._property_bool(
+                plotting_properties,
+                "show_tvlqr_gain_convergence_plot",
+                True,
+            )
             trial_cfg = self._build_trial_config(
                 trial_index=0,
                 seed=base_seed,
                 use_nominal_attitude_rate=False,
+                allow_controller_diagnostic_plots=allow_controller_diagnostic_plots,
             )
             effective_config_path = self.output_dir / "config_effective.yaml"
             with effective_config_path.open("w", encoding="utf-8") as file:
@@ -191,6 +199,11 @@ class Simulator:
         self.show_momentum_sphere_plot = self._property_bool(
             plotting_properties,
             "show_momentum_sphere_plot",
+            True,
+        )
+        self.show_tvlqr_gain_convergence_plot = self._property_bool(
+            plotting_properties,
+            "show_tvlqr_gain_convergence_plot",
             True,
         )
 
@@ -472,12 +485,19 @@ class Simulator:
                 reaction_wheel_cfg.get("G_RW_b", np.eye(3)),
                 dtype=float,
             )
-            actuator_model["reaction_wheel"] = ReactionWheel(
+            reaction_wheel = ReactionWheel(
                 max_torque=float(reaction_wheel_cfg.get("max_torque", 23e-6)),
                 max_angular_momentum=float(
                     reaction_wheel_cfg.get("max_angular_momentum", 5.8e-4)
                 ),
                 G_RW_b=wheel_axes_body,
+                wheel_positions_body=reaction_wheel_cfg.get(
+                    "wheel_positions_body", np.zeros(3)
+                ),
+            )
+            actuator_model["reaction_wheel"] = reaction_wheel
+            actuator_model["reaction_wheel_positions_body"] = (
+                reaction_wheel.wheel_positions_body
             )
             actuator_model["reaction_wheel_speeds"] = np.asarray(
                 reaction_wheel_cfg.get("wheel_speeds", np.zeros(3)),
@@ -599,12 +619,22 @@ class Simulator:
                 "TVLQR reference mode: %s",
                 "eigen_slew" if controller.use_eigen_slew else "fixed_target",
             )
-            if self._config_bool(reaction_wheel_cfg.get("plot_gain_convergence"), True):
-                gain_plot = controller.save_gain_convergence_plot(
-                    self.output_dir / "tvlqr_gain_convergence.png"
-                )
+            plot_gain_convergence = self._config_bool(
+                reaction_wheel_cfg.get("plot_gain_convergence"),
+                self.show_tvlqr_gain_convergence_plot,
+            )
+            if self.show_tvlqr_gain_convergence_plot and plot_gain_convergence:
+                gain_history_file = self._save_tvlqr_gain_history(controller)
                 self.logger.info(
-                    "TVLQR nominal gain convergence plot saved: %s", gain_plot
+                    "TVLQR nominal gain history saved: %s", gain_history_file
+                )
+                save_tvlqr_gain_convergence_plot(
+                    self.logger,
+                    self.output_dir / "tvlqr_gain_convergence.png",
+                    np.arange(controller.K_nominal_history.shape[0])
+                    * controller.lqr_dt_s,
+                    controller.K_nominal_history,
+                    controller.K_nominal,
                 )
         elif controller_type in {"magnetorquer", "magnetorquer_only"}:
             magnetorquer_cfg = (
@@ -740,6 +770,8 @@ class Simulator:
             attitude_mode = initial_attitude.strip().lower()
             if attitude_mode in {"truth", "true"}:
                 estimator_state[0:4] = true_attitude
+            elif attitude_mode == "wahba":
+                estimator_state[0:4] = true_attitude
             else:
                 seed = int(
                     estimator_cfg.get(
@@ -763,7 +795,7 @@ class Simulator:
                     estimator_state[0:4] = normalize_quaternion(rng.standard_normal(4))
                 else:
                     raise ValueError(
-                        "estimator_properties.initial_attitude must be a quaternion, truth, random, or random_unit"
+                        "estimator_properties.initial_attitude must be a quaternion, truth, wahba, random, or random_unit"
                     )
         else:
             estimator_state[0:4] = np.asarray(initial_attitude, dtype=float)
@@ -772,7 +804,58 @@ class Simulator:
             dtype=float,
         )
         self.estimator.set_state(estimator_state)
+        if (
+            isinstance(initial_attitude, str)
+            and initial_attitude.strip().lower() == "wahba"
+        ):
+            body_vectors, reference_vectors = self._initial_wahba_vectors(current_state)
+            self.estimator.initialize_from_vectors(body_vectors, reference_vectors)
+            self.logger.info(
+                "MEKF initialized with Wahba using %d vector measurements",
+                body_vectors.shape[0],
+            )
         self.logger.info("MEKF estimator enabled")
+
+    def _initial_wahba_vectors(
+        self, state: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        body_vectors = []
+        reference_vectors = []
+        position = state[self.idx["POS_ECI"]]
+        time_s = 0.0
+        for sensor_name in ("magnetometer", "sun_sensor", "visual_camera"):
+            sensor_model = self.sensor_models.get(sensor_name)
+            if sensor_model is None:
+                continue
+            measurement = self._sensor_measurement(
+                sensor_name, sensor_model, state, time_s
+            )
+            if measurement is None:
+                continue
+            measurement = np.asarray(measurement, dtype=float).reshape(-1)
+            if measurement.size != 3 or not np.isfinite(measurement).all():
+                continue
+            if sensor_name == "magnetometer":
+                reference = sensor_model.magnetic_field_model.field_eci(
+                    position, time_s
+                )
+            elif sensor_name == "sun_sensor":
+                reference = sensor_model.sun_model.direction_eci(position, time_s)
+            else:
+                reference = self.sensor_targets["visual_camera"] - position
+            reference = np.asarray(reference, dtype=float).reshape(3)
+            if np.linalg.norm(reference) == 0.0:
+                continue
+            body_vectors.append(measurement)
+            reference_vectors.append(reference)
+
+        if len(body_vectors) < 2:
+            raise ValueError(
+                "Wahba estimator initialization requires at least two finite vector measurements"
+            )
+        return np.asarray(body_vectors, dtype=float), np.asarray(
+            reference_vectors, dtype=float
+        )
 
     #################################################################################################
     # SENSOR AND ESTIMATOR UPDATES
@@ -942,6 +1025,24 @@ class Simulator:
         self.logger.info("State history saved: %s", state_file)
         return state_file
 
+    def _save_tvlqr_gain_history(
+        self, controller: ReactionWheelTVLQRController
+    ) -> Path:
+        gain_file = self.output_dir / "tvlqr_gain_history.npz"
+        time_s = (
+            np.arange(controller.K_nominal_history.shape[0], dtype=float)
+            * controller.lqr_dt_s
+        )
+        np.savez_compressed(
+            gain_file,
+            time_s=time_s,
+            K_nominal_history=np.asarray(controller.K_nominal_history, dtype=float),
+            K_nominal=np.asarray(controller.K_nominal, dtype=float),
+            P_nominal=np.asarray(controller.P_nominal, dtype=float),
+            lqr_dt_s=np.asarray(controller.lqr_dt_s, dtype=float),
+        )
+        return gain_file
+
     def _sensor_history_arrays(self) -> dict[str, dict[str, np.ndarray]]:
         sensor_history = {}
         for sensor_name, records in self.sensor_records.items():
@@ -1039,6 +1140,7 @@ class Simulator:
         trial_index: int,
         seed: int,
         use_nominal_attitude_rate: bool = True,
+        allow_controller_diagnostic_plots: bool = False,
     ) -> dict:
         """Create one trial config with sampled initial-condition uncertainties."""
         trial_cfg = deepcopy(self.cfg)
@@ -1099,11 +1201,12 @@ class Simulator:
         if isinstance(controller_properties, dict):
             reaction_wheel_cfg = controller_properties.get("reaction_wheel_tvlqr")
             if isinstance(reaction_wheel_cfg, dict):
-                # Monte Carlo workers should not create controller diagnostic
-                # plots. GUI Matplotlib backends can crash process-pool workers,
-                # and this plot is the same controller diagnostic repeated for
-                # every sampled trial.
-                reaction_wheel_cfg["plot_gain_convergence"] = False
+                # Monte Carlo workers keep controller diagnostics off by default:
+                # GUI Matplotlib backends can crash process-pool workers, and
+                # this diagnostic is repeated for every sampled trial.
+                reaction_wheel_cfg["plot_gain_convergence"] = bool(
+                    allow_controller_diagnostic_plots
+                )
 
         return trial_cfg
 
@@ -1274,9 +1377,12 @@ class Simulator:
         self, state: np.ndarray, time_s: float
     ) -> dict[str, np.ndarray]:
         """Return environmental and actuator torque components in body coordinates."""
-        environmental_torque = environmental_torque_body(
+        environmental_torque_components = environmental_torque_components_body(
             state, self.idx, time_s, self.environment_model
         )
+        environmental_torque = np.zeros(3, dtype=float)
+        for component in environmental_torque_components.values():
+            environmental_torque += component
         reaction_wheel_torque = np.zeros(3, dtype=float)
         magnetorquer_torque = np.zeros(3, dtype=float)
 
@@ -1306,6 +1412,9 @@ class Simulator:
 
         return {
             "environmental": environmental_torque,
+            "gravity_gradient": environmental_torque_components["gravity_gradient"],
+            "drag": environmental_torque_components["drag"],
+            "srp": environmental_torque_components["srp"],
             "reaction_wheel": reaction_wheel_torque,
             "magnetorquer": magnetorquer_torque,
         }
@@ -1417,6 +1526,9 @@ class Simulator:
         history[0] = state
         torque_history = {
             "environmental": np.zeros((num_steps + 1, 3), dtype=float),
+            "gravity_gradient": np.zeros((num_steps + 1, 3), dtype=float),
+            "drag": np.zeros((num_steps + 1, 3), dtype=float),
+            "srp": np.zeros((num_steps + 1, 3), dtype=float),
             "reaction_wheel": np.zeros((num_steps + 1, 3), dtype=float),
             "magnetorquer": np.zeros((num_steps + 1, 3), dtype=float),
         }
