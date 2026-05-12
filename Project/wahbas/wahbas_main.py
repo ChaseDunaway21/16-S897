@@ -1,6 +1,7 @@
 """Solve Wahba's problem from direct sensor getter calls at randomized poses.
 
 Example bash:
+cd Project
 python -m wahbas.wahbas_main --trials 100 --min-vectors 2 --plot --save ../results/wahba_monte_carlo.png
 """
 

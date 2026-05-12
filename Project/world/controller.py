@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.linalg import expm
 
-from world.math_utils import matrix_from_config, skew_symmetric, unit_vector
+from world.math_utils import matrix_from_config, skew_symmetric
 from world.rotations_and_transformations import (
     L,
     short_quaternion,
@@ -591,18 +591,27 @@ class MagnetorquerOnlyController:
         # From [1]
         if np.linalg.norm(a - h_heuristic) > self.spin_stable_tolerance:
             command_prime_b = b_hat @ (h_tgt - h)
-            voltage_command = (
-                self.max_voltage
-                * self._alpha_gain(command_prime_b)
-                * unit_vector(command_prime_b)
-            )
+            command_prime_norm = np.linalg.norm(command_prime_b)
+            if command_prime_norm > 1e-12:
+                voltage_command = (
+                    self.max_voltage
+                    * self._alpha_gain(command_prime_b)
+                    * command_prime_b
+                    / command_prime_norm
+                )
 
         elif np.linalg.norm(s - h_heuristic) > self.pointing_tolerance:
             command_prime_i = b_hat @ (s * h_tgt_norm - h)
-            voltage_command = (
-                self.max_voltage
-                * self._alpha_gain(command_prime_i)
-                * unit_vector(command_prime_i)
-            )
+            command_prime_norm = np.linalg.norm(command_prime_i)
+            if command_prime_norm > 1e-12:
+                voltage_command = (
+                    self.max_voltage
+                    * self._alpha_gain(command_prime_i)
+                    * command_prime_i
+                    / command_prime_norm
+                )
+
+        else:
+            voltage_command = np.zeros(3, dtype=float)
 
         return self._coil_voltages_from_command(voltage_command, actuator_model)

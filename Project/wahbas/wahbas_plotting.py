@@ -18,12 +18,14 @@ def plot_wahba_monte_carlo(
     from visualization.common import FIGURE_FACE_COLOR, style_time_axis
 
     trials = np.arange(1, attitude_errors_deg.size + 1)
-    fig, ax = plt.subplots(
+    fig, axes = plt.subplots(
         1,
-        1,
-        figsize=(11, 4.5),
+        2,
+        figsize=(14, 4.8),
         facecolor=FIGURE_FACE_COLOR,
+        gridspec_kw={"width_ratios": [2.2, 1.0]},
     )
+    ax, hist_ax = axes
 
     style_time_axis(ax)
     ax.plot(trials, attitude_errors_deg, color="#2563eb", linewidth=1.1)
@@ -55,6 +57,37 @@ def plot_wahba_monte_carlo(
         va="top",
         bbox={"facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.9},
     )
+
+    style_time_axis(hist_ax)
+    finite_errors = attitude_errors_deg[np.isfinite(attitude_errors_deg)]
+    if finite_errors.size > 0:
+        bins = min(30, max(8, int(np.sqrt(finite_errors.size))))
+        hist_ax.hist(
+            finite_errors,
+            bins=bins,
+            color="#93c5fd",
+            edgecolor="#1d4ed8",
+            linewidth=0.8,
+            alpha=0.9,
+        )
+        hist_ax.axvline(
+            np.mean(finite_errors),
+            color="#f59e0b",
+            linestyle="-",
+            linewidth=1.4,
+            label="mean",
+        )
+        hist_ax.axvline(
+            np.median(finite_errors),
+            color="#dc2626",
+            linestyle="--",
+            linewidth=1.2,
+            label="median",
+        )
+        hist_ax.legend(loc="upper right")
+    hist_ax.set_title("Error Distribution")
+    hist_ax.set_xlabel("error [deg]")
+    hist_ax.set_ylabel("count")
 
     fig.tight_layout()
     save_path.parent.mkdir(parents=True, exist_ok=True)
