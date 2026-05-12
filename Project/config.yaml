@@ -8,10 +8,10 @@ simulation_properties:
     value: False
 
   - name: time_step
-    value: 1 # seconds
+    value: 0.5 # seconds
 
   - name: max_simulation_time
-    value: 55000.0 # seconds
+    value: 200.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -270,8 +270,11 @@ controller_properties:
     R_diagonal: [1.889e9, 1.889e9, 1.889e9]
 
   magnetorquer_only:
-    target_spin_axis: [0.0, 0.0, 1.0]
+    target_spin_stable_axis_body: [0.0, 0.0, 1.0] # Body frame, spin around +z
     target_spin_rate: 1 # rad/s
+    target_pointing_axis_inertial: [1.0, 0.0, 0.0] # Inertial frame, sun direction
+    spin_stable_tolerance_rad: 0.2 # rad
+    pointing_tolerance_rad: 0.2
 
 sensor_properties:
   enabled: True

@@ -325,3 +325,9 @@ def quaternion_to_euler(q: np.ndarray) -> np.ndarray:
     pitch = np.arcsin(s)
     yaw = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2))
     return np.array([roll, pitch, yaw])
+
+
+def angle_to_unit_vector_distance(angle_rad: float) -> float:
+    """Difference between two subtracted unit vectors."""
+    angle = np.clip(float(angle_rad), 0.0, np.pi)
+    return 2.0 * np.sin(0.5 * angle)

@@ -39,6 +39,7 @@ from world.models.magnetic_field import MagneticFieldModel
 from world.models.solar_radiation_pressure import projected_area
 from world.models.sun import SunModel
 from world.actuators import Magnetorquer, ReactionWheel
+from world.actuators.magnetorquer import DEFAULT_MTB_ORIENTATION
 from world.sensors import (
     Accelerometer,
     Gyroscope,
@@ -289,6 +290,14 @@ class Simulator:
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
+    @staticmethod
+    def _unit_vector(value: object, field_name: str) -> np.ndarray:
+        vector = np.asarray(value, dtype=float).reshape(3)
+        norm = np.linalg.norm(vector)
+        if norm <= 1e-12:
+            raise ValueError(f"{field_name} must be a nonzero vector")
+        return vector / norm
+
     #################################################################################################
     # SENSOR SETUP
     #################################################################################################
@@ -508,37 +517,46 @@ class Simulator:
         if isinstance(magnetorquer_cfg, dict) and self._config_bool(
             magnetorquer_cfg.get("enabled"), False
         ):
-            n_magnetorquers = int(magnetorquer_cfg.get("number_magnetorquers", 6))
-            magnetorquer = Magnetorquer(
-                N_MTBs=n_magnetorquers,
-                resistance=magnetorquer_cfg.get("resistance", 3.25e-7),
-                A_cross=float(
-                    magnetorquer_cfg.get(
-                        "A_cross",
-                        magnetorquer_cfg.get(
-                            "cross-sectional_area",
-                            magnetorquer_cfg.get("coil_area", 5.432e-3),
-                        ),
-                    )
-                ),
-                N_turns=int(magnetorquer_cfg.get("N_turns", 64)),
-                max_voltage=float(magnetorquer_cfg.get("max_voltage", 5.0)),
-                max_current_rating=float(
-                    magnetorquer_cfg.get("max_current_rating", 1.0)
-                ),
-                max_power=float(magnetorquer_cfg.get("max_power", 1.0)),
-                G_MTB_b=np.asarray(
-                    magnetorquer_cfg.get(
-                        "G_MTB_b",
-                        [
-                            [1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
-                            [0.0, 0.0, 1.0, -1.0, 0.0, 0.0],
-                            [0.0, 0.0, 0.0, 0.0, 1.0, -1.0],
-                        ],
-                    ),
-                    dtype=float,
-                ),
+            magnetorquer_axes_body = np.asarray(
+                magnetorquer_cfg.get("G_MTB_b", DEFAULT_MTB_ORIENTATION),
+                dtype=float,
             )
+            if magnetorquer_axes_body.ndim != 2 or magnetorquer_axes_body.shape[0] != 3:
+                raise ValueError("actuator_properties.magnetorquer.G_MTB_b must be 3xN")
+
+            n_magnetorquers = int(
+                magnetorquer_cfg.get(
+                    "number_magnetorquers", magnetorquer_axes_body.shape[1]
+                )
+            )
+            if n_magnetorquers != magnetorquer_axes_body.shape[1]:
+                raise ValueError(
+                    "actuator_properties.magnetorquer.number_magnetorquers must "
+                    "match the number of G_MTB_b columns"
+                )
+
+            coil_area_m2 = float(
+                magnetorquer_cfg.get(
+                    "A_cross",
+                    magnetorquer_cfg.get(
+                        "cross-sectional_area",
+                        magnetorquer_cfg.get("coil_area", 5.432e-3),
+                    ),
+                )
+            )
+            magnetorquer_kwargs = {
+                "N_MTBs": n_magnetorquers,
+                "resistance": magnetorquer_cfg.get("resistance", 25.0),
+                "A_cross": coil_area_m2,
+                "N_turns": int(magnetorquer_cfg.get("N_turns", 64)),
+                "max_voltage": float(magnetorquer_cfg.get("max_voltage", 8.4)),
+                "max_current_rating": float(
+                    magnetorquer_cfg.get("max_current_rating", 9999.0)
+                ),
+                "max_power": float(magnetorquer_cfg.get("max_power", 9999.0)),
+                "G_MTB_b": magnetorquer_axes_body,
+            }
+            magnetorquer = Magnetorquer(**magnetorquer_kwargs)
             actuator_model["magnetorquer"] = magnetorquer
             magnetorquer_voltages = np.asarray(
                 magnetorquer_cfg.get("voltages", np.zeros(n_magnetorquers)),
@@ -614,25 +632,29 @@ class Simulator:
                 raise ValueError(
                     "controller_properties.reaction_wheel_tvlqr.target_attitude must be set"
                 )
-            controller = ReactionWheelTVLQRController(
-                target_attitude=target_attitude,
-                target_rate_body=reaction_wheel_cfg.get("target_rate_body"),
-                update_period_s=update_period_s,
-                use_eigen_slew=self._config_bool(
+
+            reaction_wheel_kwargs = {
+                "target_attitude": target_attitude,
+                "target_rate_body": reaction_wheel_cfg.get("target_rate_body"),
+                "update_period_s": update_period_s,
+                "use_eigen_slew": self._config_bool(
                     reaction_wheel_cfg.get("use_eigen_slew"), True
                 ),
-                slew_duration_s=float(reaction_wheel_cfg.get("slew_duration_s", 60.0)),
-                lqr_dt_s=float(reaction_wheel_cfg.get("lqr_dt_s", self.dt)),
-                nominal_gain_steps=int(
+                "slew_duration_s": float(
+                    reaction_wheel_cfg.get("slew_duration_s", 60.0)
+                ),
+                "lqr_dt_s": float(reaction_wheel_cfg.get("lqr_dt_s", self.dt)),
+                "nominal_gain_steps": int(
                     reaction_wheel_cfg.get("nominal_gain_steps", 54_000)
                 ),
-                Q=reaction_wheel_cfg.get("Q", reaction_wheel_cfg.get("Q_diagonal")),
-                R=reaction_wheel_cfg.get("R", reaction_wheel_cfg.get("R_diagonal")),
-                inertia_tensor=self.spacecraft.inertia_tensor,
-                wheel_axes_body=wheel_axes_body,
-                wheel_max_torque=wheel_max_torque,
-                wheel_max_angular_momentum=wheel_max_angular_momentum,
-            )
+                "Q": reaction_wheel_cfg.get("Q", reaction_wheel_cfg.get("Q_diagonal")),
+                "R": reaction_wheel_cfg.get("R", reaction_wheel_cfg.get("R_diagonal")),
+                "inertia_tensor": self.spacecraft.inertia_tensor,
+                "wheel_axes_body": wheel_axes_body,
+                "wheel_max_torque": wheel_max_torque,
+                "wheel_max_angular_momentum": wheel_max_angular_momentum,
+            }
+            controller = ReactionWheelTVLQRController(**reaction_wheel_kwargs)
             self.logger.info(
                 "TVLQR reference mode: %s",
                 "eigen_slew" if controller.use_eigen_slew else "fixed_target",
@@ -663,13 +685,34 @@ class Simulator:
                 if self.actuator_model is None
                 else self.actuator_model.get("magnetorquer")
             )
-            target_spin_axis = self._section_value(
-                magnetorquer_cfg,
-                "target_spin_axis",
-                self.spacecraft.desired_spin_axis,
+            target_spin_stable_axis_body = self._unit_vector(
+                self._section_value(
+                    magnetorquer_cfg,
+                    "target_spin_stable_axis_body",
+                    self._section_value(
+                        magnetorquer_cfg,
+                        "target_spin_axis",
+                        self.spacecraft.desired_spin_axis,
+                    ),
+                ),
+                "controller_properties.magnetorquer_only.target_spin_stable_axis_body",
+            )
+            target_pointing_axis_inertial = self._unit_vector(
+                self._section_value(
+                    magnetorquer_cfg,
+                    "target_pointing_axis_inertial",
+                    self._section_value(
+                        magnetorquer_cfg,
+                        "target_pointing_axis",
+                        self.spacecraft.sun_direction_eci,
+                    ),
+                ),
+                "controller_properties.magnetorquer_only.target_pointing_axis_inertial",
             )
             target_rate_body = self._section_value(
-                magnetorquer_cfg, "target_rate_body", None
+                magnetorquer_cfg,
+                "target_rate_body",
+                None,
             )
             target_spin_rate = self._section_value(
                 magnetorquer_cfg,
@@ -677,30 +720,36 @@ class Simulator:
                 self.spacecraft.desired_spin_rate,
             )
             if target_rate_body is None:
-                target_rate_body = float(target_spin_rate) * np.asarray(
-                    target_spin_axis, dtype=float
+                target_rate_body = (
+                    float(target_spin_rate) * target_spin_stable_axis_body
                 )
             spin_stable_tolerance_rad = float(
-                self._section_value(magnetorquer_cfg, "spin_stable_tolerance_rad", 0.5)
+                self._section_value(
+                    magnetorquer_cfg,
+                    "spin_stable_tolerance_rad",
+                    0.5,
+                )
             )
             pointing_tolerance_rad = float(
                 self._section_value(magnetorquer_cfg, "pointing_tolerance_rad", 0.5)
             )
-            controller = MagnetorquerOnlyController(
-                target_rate_body=target_rate_body,
-                target_spin_axis=target_spin_axis,
-                update_period_s=update_period_s,
-                spin_stable_tolerance_rad=spin_stable_tolerance_rad,
-                pointing_tolerance_rad=pointing_tolerance_rad,
-                inertia_tensor=self.spacecraft.inertia_tensor,
-                max_voltage=float(
+            magnetorquer_kwargs = {
+                "target_rate_body": target_rate_body,
+                "target_spin_stable_axis_body": target_spin_stable_axis_body,
+                "target_pointing_axis_inertial": target_pointing_axis_inertial,
+                "update_period_s": update_period_s,
+                "spin_stable_tolerance_rad": spin_stable_tolerance_rad,
+                "pointing_tolerance_rad": pointing_tolerance_rad,
+                "inertia_tensor": self.spacecraft.inertia_tensor,
+                "max_voltage": float(
                     self._section_value(
                         magnetorquer_cfg,
                         "max_voltage",
-                        5.0 if magnetorquer is None else magnetorquer.max_voltage,
+                        8.4 if magnetorquer is None else magnetorquer.max_voltage,
                     )
                 ),
-            )
+            }
+            controller = MagnetorquerOnlyController(**magnetorquer_kwargs)
         else:
             raise ValueError(f"Unknown controller type: {controller_type}")
 
@@ -769,7 +818,6 @@ class Simulator:
             state,
             self.idx,
             time_s,
-            environment_model=self.environment_model,
             actuator_model=self.actuator_model,
             estimator_state=self._estimator_state_for_controller(state),
         )

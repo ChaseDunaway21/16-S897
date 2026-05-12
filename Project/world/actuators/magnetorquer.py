@@ -33,12 +33,12 @@ class Magnetorquer:
     def __init__(
         self,
         N_MTBs: int = 6,
-        resistance: float | np.ndarray = 3.25e-7,
+        resistance: float | np.ndarray = 25,
         A_cross: float = 5.432e-3,
         N_turns: int = 64,
-        max_voltage: float = 5.0,
-        max_current_rating: float = 1.0,
-        max_power: float = 1.0,
+        max_voltage: float = 8.4,
+        max_current_rating: float = 9999.0,
+        max_power: float = 9999.0,
         G_MTB_b: np.ndarray = DEFAULT_MTB_ORIENTATION,
     ) -> None:
         self.N_MTBs = int(N_MTBs)
