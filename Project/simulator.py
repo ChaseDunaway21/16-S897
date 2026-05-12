@@ -1786,34 +1786,47 @@ class Simulator:
 #################################################################################################
 
 
+def _clear_spice_kernels() -> None:
+    """Reset process-local SPICE kernel state before/after pooled trials."""
+    import spiceypy as spice
+
+    spice.kclear()
+
+
 def _run_single_monte_carlo_trial(
     config_path: str,
     output_dir: str,
     save_plots: bool,
 ) -> dict[str, object]:
     """Run one Monte Carlo trial in an isolated output directory."""
-    run_dir = Path(output_dir)
-    sim = Simulator(config_path=Path(config_path), output_dir=run_dir)
-    result = sim.run(show_progress=False)
-    state_file = result.get("state_history_file") or str(run_dir / "state_history.npz")
-    if save_plots:
-        sim.plot_simulation(result, show=False)
-        if sim.show_momentum_sphere_plot:
-            sim.plot_momentum_sphere(result, show=False)
+    _clear_spice_kernels()
+    try:
+        run_dir = Path(output_dir)
+        sim = Simulator(config_path=Path(config_path), output_dir=run_dir)
+        result = sim.run(show_progress=False)
+        state_file = result.get("state_history_file") or str(
+            run_dir / "state_history.npz"
+        )
+        if save_plots:
+            sim.plot_simulation(result, show=False)
+            if sim.show_momentum_sphere_plot:
+                sim.plot_momentum_sphere(result, show=False)
 
-    final_state = np.asarray(result["state_history_si"])[-1]
-    idx = sim.idx
-    return {
-        "status": "ok",
-        "output_dir": str(run_dir),
-        "log_file": str(result["log_file"]),
-        "state_file": str(state_file),
-        "sensor_file": result.get("sensor_history_file"),
-        "estimator_file": result.get("estimator_history_file"),
-        "num_steps": int(result["num_steps"]),
-        "final_position_m": final_state[idx["POS_ECI"]].tolist(),
-        "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
-        "final_attitude": final_state[idx["ATTITUDE"]].tolist(),
-        "final_omega_rads": final_state[idx["ATTITUDE_RATE"]].tolist(),
-        "final_rho_kgm2s": final_state[idx["RHO"]].tolist(),
-    }
+        final_state = np.asarray(result["state_history_si"])[-1]
+        idx = sim.idx
+        return {
+            "status": "ok",
+            "output_dir": str(run_dir),
+            "log_file": str(result["log_file"]),
+            "state_file": str(state_file),
+            "sensor_file": result.get("sensor_history_file"),
+            "estimator_file": result.get("estimator_history_file"),
+            "num_steps": int(result["num_steps"]),
+            "final_position_m": final_state[idx["POS_ECI"]].tolist(),
+            "final_velocity_ms": final_state[idx["VEL_ECI"]].tolist(),
+            "final_attitude": final_state[idx["ATTITUDE"]].tolist(),
+            "final_omega_rads": final_state[idx["ATTITUDE_RATE"]].tolist(),
+            "final_rho_kgm2s": final_state[idx["RHO"]].tolist(),
+        }
+    finally:
+        _clear_spice_kernels()

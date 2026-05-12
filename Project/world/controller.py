@@ -555,8 +555,8 @@ class MagnetorquerOnlyController:
         estimator_state: np.ndarray | None = None,
     ) -> np.ndarray:
         """
-        From [1], the controller compares the desired spin rate to the spin rate determined from the momentum vector,
-        and applies a command
+        From [1], the controller aligns the angular momentum with the target spin-stable axis first,
+        then aligns the angular momentum with the time-varying target pointing axis.
         """
 
         feedback_state = state if estimator_state is None else estimator_state
