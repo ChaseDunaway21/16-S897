@@ -8,10 +8,10 @@ simulation_properties:
     value: False
 
   - name: time_step
-    value: 0.5 # seconds
+    value: 1 # seconds
 
   - name: max_simulation_time
-    value: 3000.0 # seconds
+    value: 55000.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -239,9 +239,23 @@ actuator_properties:
       - [0.9, 0.9, 0.9]
     wheel_speeds: [0.0, 0.0, 0.0]
 
+  magnetorquer:
+    enabled: True
+    number_magnetorquers: 6
+    G_MTB_b:
+      - [1.0, -1.0, 0.0, 0.0, 0.0, 0.0]
+      - [0.0, 0.0, 1.0, -1.0, 0.0, 0.0]
+      - [0.0, 0.0, 0.0, 0.0, 1.0, -1.0]
+    cross-sectional_area: 5.432e-3 # m^2
+    N_turns:  64 
+    resistance: 25 # Ohms
+    max_voltage: 8.4 # V
+    max_current_rating: 999999 # A, no power limit
+    max_power: 999999 # W, no power limit
+
 controller_properties:
   enabled: True
-  type: reaction_wheel_tvlqr # reaction_wheel_tvlqr or magnetorquer_only
+  type: magnetorquer_only # reaction_wheel_tvlqr or magnetorquer_only
   update_rate_hz: 0.0 # <= 0 updates every integration step
 
   reaction_wheel_tvlqr:
@@ -256,8 +270,8 @@ controller_properties:
     R_diagonal: [1.889e9, 1.889e9, 1.889e9]
 
   magnetorquer_only:
-    N_MTBs: 6
-    voltages_command: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    target_spin_axis: [0.0, 0.0, 1.0]
+    target_spin_rate: 1 # rad/s
 
 sensor_properties:
   enabled: True

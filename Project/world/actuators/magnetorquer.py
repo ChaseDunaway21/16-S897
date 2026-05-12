@@ -42,6 +42,8 @@ class Magnetorquer:
         G_MTB_b: np.ndarray = DEFAULT_MTB_ORIENTATION,
     ) -> None:
         self.N_MTBs = int(N_MTBs)
+        if self.N_MTBs <= 0:
+            raise ValueError("N_MTBs must be positive")
         self.resistance = np.asarray(resistance, dtype=float)
         if self.resistance.ndim == 0:
             self.resistance = np.full(self.N_MTBs, float(self.resistance))
@@ -55,6 +57,8 @@ class Magnetorquer:
         self.max_power = float(max_power)
 
         self.G_MTB_b = np.asarray(G_MTB_b, dtype=float)
+        if self.G_MTB_b.shape != (3, self.N_MTBs):
+            raise ValueError(f"G_MTB_b must have shape (3, {self.N_MTBs})")
 
     def get_torque(
         self,
@@ -71,9 +75,13 @@ class Magnetorquer:
     ) -> np.ndarray:
         """Return total torque from body-frame magnetic field [N m]."""
         currents = self._currents_from_voltages(voltages)
-        dipole_moments = self.N_turns * self.A_cross * self.G_MTB_b * currents
+        dipole_moments = (
+            self.N_turns * self.A_cross * self.G_MTB_b * currents[np.newaxis, :]
+        )
+        magnetic_field_tesla = 1e-6 * np.asarray(magnetic_field_body, dtype=float)
         torques = np.cross(
-            dipole_moments.T, np.asarray(magnetic_field_body, dtype=float)
+            dipole_moments.T,
+            magnetic_field_tesla,
         )
         return np.sum(torques, axis=0)
 
@@ -81,14 +89,18 @@ class Magnetorquer:
         """Get the current from the commanded voltage."""
 
         voltages = np.asarray(voltages, dtype=float).reshape(self.N_MTBs)
+        voltage_limit = np.full(self.N_MTBs, self.max_voltage, dtype=float)
+        if self.max_current_rating > 0.0:
+            voltage_limit = np.minimum(
+                voltage_limit,
+                self.max_current_rating * self.resistance,
+            )
+        if self.max_power > 0.0:
+            voltage_limit = np.minimum(
+                voltage_limit,
+                np.sqrt(self.max_power * self.resistance),
+            )
+
+        voltages = np.clip(voltages, -voltage_limit, voltage_limit)
         currents = voltages / self.resistance
-        power = voltages * currents
-
-        if np.any(np.abs(currents) > self.max_current_rating):
-            raise ValueError("Current exceeds maximum current rating.")
-        if np.any(np.abs(voltages) > self.max_voltage):
-            raise ValueError("Voltage exceeds maximum voltage rating.")
-        if np.any(np.abs(power) > self.max_power):
-            raise ValueError("Power exceeds maximum power rating.")
-
         return currents

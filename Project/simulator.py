@@ -508,11 +508,19 @@ class Simulator:
         if isinstance(magnetorquer_cfg, dict) and self._config_bool(
             magnetorquer_cfg.get("enabled"), False
         ):
-            n_magnetorquers = int(magnetorquer_cfg.get("N_MTBs", 6))
-            actuator_model["magnetorquer"] = Magnetorquer(
+            n_magnetorquers = int(magnetorquer_cfg.get("number_magnetorquers", 6))
+            magnetorquer = Magnetorquer(
                 N_MTBs=n_magnetorquers,
                 resistance=magnetorquer_cfg.get("resistance", 3.25e-7),
-                A_cross=float(magnetorquer_cfg.get("A_cross", 5.432e-3)),
+                A_cross=float(
+                    magnetorquer_cfg.get(
+                        "A_cross",
+                        magnetorquer_cfg.get(
+                            "cross-sectional_area",
+                            magnetorquer_cfg.get("coil_area", 5.432e-3),
+                        ),
+                    )
+                ),
                 N_turns=int(magnetorquer_cfg.get("N_turns", 64)),
                 max_voltage=float(magnetorquer_cfg.get("max_voltage", 5.0)),
                 max_current_rating=float(
@@ -531,10 +539,20 @@ class Simulator:
                     dtype=float,
                 ),
             )
-            actuator_model["magnetorquer_voltages"] = np.asarray(
+            actuator_model["magnetorquer"] = magnetorquer
+            magnetorquer_voltages = np.asarray(
                 magnetorquer_cfg.get("voltages", np.zeros(n_magnetorquers)),
                 dtype=float,
-            ).reshape(n_magnetorquers)
+            ).reshape(-1)
+            if magnetorquer_voltages.size not in (3, n_magnetorquers):
+                raise ValueError(
+                    "actuator_properties.magnetorquer.voltages must have "
+                    f"length 3 or {n_magnetorquers}"
+                )
+            actuator_model["magnetorquer_voltages"] = np.asarray(
+                magnetorquer_voltages,
+                dtype=float,
+            )
             actuator_model["magnetic_field_model"] = MagneticFieldModel()
 
         enabled_names = []
@@ -582,9 +600,9 @@ class Simulator:
             )
             wheel_axes_body = None if reaction_wheel is None else reaction_wheel.G_RW_b
             wheel_max_torque = (
-                23e-6
+                23e-6  # Default value for the RW1
                 if reaction_wheel is None
-                else reaction_wheel.max_torque  # Default value for the RW1
+                else reaction_wheel.max_torque
             )
             wheel_max_angular_momentum = (
                 5.8e-4  # Default value for the RW1
@@ -598,22 +616,22 @@ class Simulator:
                 )
             controller = ReactionWheelTVLQRController(
                 target_attitude=target_attitude,
-                update_period_s=update_period_s,
-                inertia_tensor=self.spacecraft.inertia_tensor,
                 target_rate_body=reaction_wheel_cfg.get("target_rate_body"),
-                slew_duration_s=float(reaction_wheel_cfg.get("slew_duration_s", 60.0)),
-                lqr_dt_s=float(reaction_wheel_cfg.get("lqr_dt_s", self.dt)),
-                Q=reaction_wheel_cfg.get("Q", reaction_wheel_cfg.get("Q_diagonal")),
-                R=reaction_wheel_cfg.get("R", reaction_wheel_cfg.get("R_diagonal")),
-                wheel_axes_body=wheel_axes_body,
-                wheel_max_torque=wheel_max_torque,
-                wheel_max_angular_momentum=wheel_max_angular_momentum,
-                nominal_gain_steps=int(
-                    reaction_wheel_cfg.get("nominal_gain_steps", 54_000)
-                ),
+                update_period_s=update_period_s,
                 use_eigen_slew=self._config_bool(
                     reaction_wheel_cfg.get("use_eigen_slew"), True
                 ),
+                slew_duration_s=float(reaction_wheel_cfg.get("slew_duration_s", 60.0)),
+                lqr_dt_s=float(reaction_wheel_cfg.get("lqr_dt_s", self.dt)),
+                nominal_gain_steps=int(
+                    reaction_wheel_cfg.get("nominal_gain_steps", 54_000)
+                ),
+                Q=reaction_wheel_cfg.get("Q", reaction_wheel_cfg.get("Q_diagonal")),
+                R=reaction_wheel_cfg.get("R", reaction_wheel_cfg.get("R_diagonal")),
+                inertia_tensor=self.spacecraft.inertia_tensor,
+                wheel_axes_body=wheel_axes_body,
+                wheel_max_torque=wheel_max_torque,
+                wheel_max_angular_momentum=wheel_max_angular_momentum,
             )
             self.logger.info(
                 "TVLQR reference mode: %s",
@@ -640,13 +658,48 @@ class Simulator:
             magnetorquer_cfg = (
                 self._section_value(controller_cfg, "magnetorquer_only", {}) or {}
             )
-            n_magnetorquers = int(magnetorquer_cfg.get("N_MTBs", 6))
+            magnetorquer = (
+                None
+                if self.actuator_model is None
+                else self.actuator_model.get("magnetorquer")
+            )
+            target_spin_axis = self._section_value(
+                magnetorquer_cfg,
+                "target_spin_axis",
+                self.spacecraft.desired_spin_axis,
+            )
+            target_rate_body = self._section_value(
+                magnetorquer_cfg, "target_rate_body", None
+            )
+            target_spin_rate = self._section_value(
+                magnetorquer_cfg,
+                "target_spin_rate",
+                self.spacecraft.desired_spin_rate,
+            )
+            if target_rate_body is None:
+                target_rate_body = float(target_spin_rate) * np.asarray(
+                    target_spin_axis, dtype=float
+                )
+            spin_stable_tolerance_rad = float(
+                self._section_value(magnetorquer_cfg, "spin_stable_tolerance_rad", 0.5)
+            )
+            pointing_tolerance_rad = float(
+                self._section_value(magnetorquer_cfg, "pointing_tolerance_rad", 0.5)
+            )
             controller = MagnetorquerOnlyController(
-                n_magnetorquers=n_magnetorquers,
-                voltages_command=magnetorquer_cfg.get(
-                    "voltages_command", np.zeros(n_magnetorquers)
-                ),
+                target_rate_body=target_rate_body,
+                target_spin_axis=target_spin_axis,
                 update_period_s=update_period_s,
+                spin_stable_tolerance_rad=spin_stable_tolerance_rad,
+                pointing_tolerance_rad=pointing_tolerance_rad,
+                inertia_tensor=self.spacecraft.inertia_tensor,
+                max_voltage=float(
+                    self._section_value(
+                        magnetorquer_cfg,
+                        "max_voltage",
+                        5.0 if magnetorquer is None else magnetorquer.max_voltage,
+                    )
+                ),
             )
         else:
             raise ValueError(f"Unknown controller type: {controller_type}")
@@ -671,9 +724,17 @@ class Simulator:
             return
 
         if isinstance(self.controller, MagnetorquerOnlyController):
-            self.actuator_model["magnetorquer_voltages"] = np.asarray(
-                command, dtype=float
-            ).reshape(-1)
+            command_array = np.asarray(command, dtype=float).reshape(-1)
+            magnetorquer = self.actuator_model.get("magnetorquer")
+            if magnetorquer is not None and command_array.size not in (
+                3,
+                magnetorquer.N_MTBs,
+            ):
+                raise ValueError(
+                    "Magnetorquer controller command must have length "
+                    f"3 or {magnetorquer.N_MTBs}"
+                )
+            self.actuator_model["magnetorquer_voltages"] = command_array
 
     def _estimator_state_for_controller(self, state: np.ndarray) -> np.ndarray | None:
         if not self.estimator_enabled or self.estimator is None:
@@ -708,7 +769,6 @@ class Simulator:
             state,
             self.idx,
             time_s,
-            spacecraft=self.spacecraft,
             environment_model=self.environment_model,
             actuator_model=self.actuator_model,
             estimator_state=self._estimator_state_for_controller(state),

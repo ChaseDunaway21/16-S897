@@ -218,8 +218,9 @@ class MEKF:
     def get_smoothed_state(self) -> np.ndarray:
         """
         Return a smoothed
-
         """
+
+        # TODO:
 
     def set_state(self, state: np.ndarray) -> None:
         """Set the nominal quaternion and gyro-bias state."""

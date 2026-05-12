@@ -296,7 +296,17 @@ def actuator_rho_dot_body(
     actuator_model: dict | None = None,
 ) -> np.ndarray:
     """Return gyrostat-momentum derivative from internal actuators [N m]."""
-    return -actuator_torque_body(state, state_index, current_time, actuator_model)
+    _ = state, state_index, current_time
+    if not actuator_model:
+        return np.zeros(3, dtype=float)
+
+    reaction_wheel = actuator_model.get("reaction_wheel")
+    if reaction_wheel is None:
+        return np.zeros(3, dtype=float)
+
+    return -reaction_wheel.get_torque(
+        actuator_model.get("reaction_wheel_speeds", np.zeros(3))
+    )
 
 
 def rk4_step(

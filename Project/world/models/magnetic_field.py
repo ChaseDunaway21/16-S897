@@ -34,10 +34,35 @@ from world.rotations_and_transformations import (
 class MagneticFieldModel:
     """Earth magnetic field in ECI using IGRF-14."""
 
+    def __init__(self) -> None:
+        self._cached_time_s: float | None = None
+        self._cached_position_eci_m: np.ndarray | None = None
+        self._cached_field_eci: np.ndarray | None = None
+
     def field_eci(self, position_eci_m: np.ndarray, time_s: float = 0.0) -> np.ndarray:
         """Return magnetic flux density [uT] at an ECI position."""
-        r = np.asarray(position_eci_m, dtype=float)
-        return 1e-3 * self._igrf14_field_eci(r, time_s)
+        r = np.asarray(position_eci_m, dtype=float).reshape(3)
+        t = float(time_s)
+
+        if (
+            self._cached_time_s == t
+            and self._cached_position_eci_m is not None
+            and self._cached_field_eci is not None
+            and np.array_equal(r, self._cached_position_eci_m)
+        ):
+            return self._cached_field_eci.copy()
+
+        field_eci = 1e-3 * self._igrf14_field_eci(r, t)
+        self._cached_time_s = t
+        self._cached_position_eci_m = r.copy()
+        self._cached_field_eci = field_eci.copy()
+        return field_eci
+
+    def clear_cache(self) -> None:
+        """Forget the last magnetic-field sample."""
+        self._cached_time_s = None
+        self._cached_position_eci_m = None
+        self._cached_field_eci = None
 
     def _igrf14_field_eci(
         self, position_eci_m: np.ndarray, time_s: float

@@ -1,4 +1,12 @@
-"""Attitude controllers and TVLQR helper math."""
+"""
+Attitude controllers and TVLQR helper math.
+
+References:
+[1] Fisch, Paulo Rotband Marchtein.
+    Advancing Spacecraft Autonomy: Optimal GNC, Vision-Based Estimation, and Systems Integration for Small Spacecraft.
+    2026. Carnegie Mellon University, PhD dissertation. CMU Robotics Institute,
+    Technical Report CMU-RI-TR-26-12.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +23,7 @@ from world.rotations_and_transformations import (
     quaternion_from_rotation_vector,
     rotation_vector_from_quaternion,
     quaternion_to_rotation_matrix,
+    inertial_to_body,
 )
 
 
@@ -153,34 +162,34 @@ class ReactionWheelTVLQRController:
     def __init__(
         self,
         target_attitude: np.ndarray,
-        update_period_s: float = 0.0,
-        inertia_tensor: np.ndarray | None = None,
         target_rate_body: np.ndarray | None = None,
+        update_period_s: float = 0.0,
+        use_eigen_slew: bool = True,
         slew_duration_s: float = 60.0,
         lqr_dt_s: float = 0.1,
         Q: np.ndarray | None = None,
         R: np.ndarray | None = None,
+        inertia_tensor: np.ndarray | None = None,
         wheel_axes_body: np.ndarray | None = None,
         wheel_max_torque: float = 23e-6,
         wheel_max_angular_momentum: float = 5.8e-4,
         nominal_gain_steps: int = 54_000,
-        use_eigen_slew: bool = True,
     ) -> None:
-        self.update_period_s = float(update_period_s)
-        self.inertia_tensor = (
-            np.eye(3) * 1e-3
-            if inertia_tensor is None
-            else np.asarray(inertia_tensor, dtype=float)
-        )
         self.target_attitude = normalize_quaternion(target_attitude)
         self.target_rate_body = (
             np.zeros(3)
             if target_rate_body is None
             else np.asarray(target_rate_body, dtype=float).reshape(3)
         )
+        self.update_period_s = float(update_period_s)
+        self.use_eigen_slew = bool(use_eigen_slew)
         self.slew_duration_s = max(float(slew_duration_s), 1e-9)
         self.lqr_dt_s = max(float(lqr_dt_s), 1e-6)
-        self.use_eigen_slew = bool(use_eigen_slew)
+        self.inertia_tensor = (
+            np.eye(3) * 1e-3
+            if inertia_tensor is None
+            else np.asarray(inertia_tensor, dtype=float)
+        )
         self.wheel_axes_body = (
             np.eye(3)
             if wheel_axes_body is None
@@ -429,13 +438,10 @@ class ReactionWheelTVLQRController:
         state: np.ndarray,
         state_index: dict,
         time_s: float,
-        *,
-        spacecraft=None,
         environment_model: dict | None = None,
         actuator_model: dict | None = None,
         estimator_state: np.ndarray | None = None,
     ) -> np.ndarray:
-        _ = spacecraft, environment_model
         feedback_state = state if estimator_state is None else estimator_state
         if not self.reference_initialized:
             self.initialize_reference(feedback_state, state_index, time_s)
@@ -454,23 +460,82 @@ class ReactionWheelTVLQRController:
 
 
 class MagnetorquerOnlyController:
-    """Fixed-command magnetorquer controller."""
+    """Magnetorquer-only angular-momentum controller."""
 
     def __init__(
         self,
-        n_magnetorquers: int = 6,
-        voltages_command: np.ndarray | None = None,
+        target_rate_body: np.ndarray | None = None,
+        target_spin_axis: np.ndarray | None = None,
+        spin_stable_tolerance_rad: float = 0.1,
+        pointing_tolerance_rad: float = 0.1,
         update_period_s: float = 0.0,
+        inertia_tensor: np.ndarray | None = None,
+        max_voltage: float = 5.0,
     ) -> None:
-        self.update_period_s = float(update_period_s)
-        self.n_magnetorquers = int(n_magnetorquers)
-        command = (
-            np.zeros(self.n_magnetorquers)
-            if voltages_command is None
-            else voltages_command
+        if target_spin_axis is None:
+            self.target_spin_axis = np.array([0.0, 0.0, 1.0], dtype=float)
+        else:
+            target_spin_axis_arr = np.array(target_spin_axis, dtype=float).reshape(3)
+            if np.linalg.norm(target_spin_axis_arr) <= 1e-12:
+                raise ValueError("target_spin_axis must be a nonzero vector")
+            self.target_spin_axis = target_spin_axis_arr / np.linalg.norm(
+                target_spin_axis_arr
+            )
+
+        if target_rate_body is None:
+            self.target_rate_body = (10.0 * 2.0 * np.pi / 60.0) * self.target_spin_axis
+        else:
+            target_rate = np.asarray(target_rate_body, dtype=float).reshape(-1)
+            if target_rate.size == 1:
+                self.target_rate_body = float(target_rate[0]) * self.target_spin_axis
+            elif target_rate.size == 3:
+                self.target_rate_body = target_rate
+            else:
+                raise ValueError("target_rate_body must be a scalar or length-3 vector")
+        self.target_rate = self.target_rate_body
+
+        self.inertia_tensor = (
+            np.eye(3) * 1e-3
+            if inertia_tensor is None
+            else np.asarray(inertia_tensor, dtype=float)
         )
-        self.voltages_command = np.asarray(command, dtype=float).reshape(
-            self.n_magnetorquers
+        self.update_period_s = float(update_period_s)
+        self.spin_stable_tolerance_rad = float(spin_stable_tolerance_rad)
+        self.pointing_tolerance_rad = float(pointing_tolerance_rad)
+        self.max_voltage = float(max_voltage)
+        self.momentum_target = self.inertia_tensor @ self.target_rate_body
+
+    def _alpha_gain(
+        self,
+        command_vector: np.ndarray,
+        k: int = 1,
+    ) -> float:
+        """
+        As defined in [1], alpha is a smoothing scalar gain that takes in the
+        command vector and outputs a value between 0 and 1 of that vector.
+        The command is for spin-stabilization first or sun-pointing second, depending
+        on the state of the system.
+        """
+        if np.linalg.norm(command_vector) < 1e-12:
+            return 0.0
+        return np.tanh(k * np.linalg.norm(command_vector))
+
+    def _coil_voltages_from_command(
+        self, voltages: np.ndarray, actuator_model: dict | None
+    ) -> np.ndarray:
+        """Map a 3D body-axis command to the configured physical coils."""
+        voltage_command = np.asarray(voltages, dtype=float).reshape(-1)
+        magnetorquer = (
+            None if actuator_model is None else actuator_model.get("magnetorquer")
+        )
+        if magnetorquer is None:
+            return voltage_command
+        if voltage_command.size == magnetorquer.N_MTBs:
+            return voltage_command
+        if voltage_command.size == 3:
+            return np.linalg.pinv(magnetorquer.G_MTB_b) @ voltage_command
+        raise ValueError(
+            f"magnetorquer voltage command must have length 3 or {magnetorquer.N_MTBs}"
         )
 
     def compute_command(
@@ -478,19 +543,62 @@ class MagnetorquerOnlyController:
         state: np.ndarray,
         state_index: dict,
         time_s: float,
-        *,
-        spacecraft=None,
         environment_model: dict | None = None,
         actuator_model: dict | None = None,
         estimator_state: np.ndarray | None = None,
     ) -> np.ndarray:
-        _ = (
-            state,
-            state_index,
-            time_s,
-            spacecraft,
-            environment_model,
-            actuator_model,
-            estimator_state,
+        """
+        From [1], the controller compares the desired spin rate to the spin rate determined from the momentum vector,
+        and applies a command
+        """
+
+        feedback_state = state if estimator_state is None else estimator_state
+        _ = environment_model
+        magnetic_field_model = (
+            None
+            if actuator_model is None
+            else actuator_model.get("magnetic_field_model")
         )
-        return self.voltages_command.copy()
+        if magnetic_field_model is None:
+            return np.zeros(3, dtype=float)
+
+        magnetic_field_eci = magnetic_field_model.field_eci(
+            feedback_state[state_index["POS_ECI"]], time_s
+        )
+        b = inertial_to_body(
+            feedback_state[state_index["ATTITUDE"]], magnetic_field_eci
+        )
+        b_hat = skew_symmetric(b)
+
+        omega = feedback_state[state_index["ATTITUDE_RATE"]]
+        h = self.inertia_tensor @ omega
+        h_des = self.momentum_target
+        h_des_norm = np.linalg.norm(h_des)
+
+        a = self.target_rate
+        s = self.target_spin_axis
+        spin_axis_body = h / h_des_norm if h_des_norm > 1e-12 else np.zeros(3)
+        spin_axis_error = np.cross(spin_axis_body, self.target_spin_axis)
+        _ = spin_axis_error
+
+        # From [1]
+        if h_des_norm <= 1e-12:
+            command_prime_b = b_hat @ (-h)
+            voltage_command = (
+                self.max_voltage * self._alpha_gain(command_prime_b) * command_prime_b
+            )
+        elif np.linalg.norm(a - h / h_des_norm) > self.spin_stable_tolerance_rad:
+            command_prime_b = b_hat @ (h_des - h)
+            voltage_command = (
+                self.max_voltage * self._alpha_gain(command_prime_b) * command_prime_b
+            )
+
+        elif np.linalg.norm(s - h / h_des_norm) > self.pointing_tolerance_rad:
+            command_prime_i = b_hat @ (s * h_des_norm - h)
+            voltage_command = (
+                self.max_voltage * self._alpha_gain(command_prime_i) * command_prime_i
+            )
+        else:
+            voltage_command = np.zeros(3, dtype=float)
+
+        return self._coil_voltages_from_command(voltage_command, actuator_model)
