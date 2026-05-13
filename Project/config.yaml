@@ -8,10 +8,10 @@ simulation_properties:
     value: False
 
   - name: time_step
-    value: 0.5 # seconds
+    value: 2 # seconds
 
   - name: max_simulation_time
-    value: 200.0 # seconds
+    value: 5400.0 # seconds
 
   - name: log_interval_steps
     value: 10.0
@@ -43,7 +43,7 @@ initial_conditions:
     deviation: 00 # degrees
 
   - name : attitude
-    value: [0.7071067811865475,0,0,0.7071067811865475]  #[-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
+    value: safe_mode  #[-0.1786262, 0.5376016, -0.1786262, -0.8044687] # a specified quaternion, safe_mode, or random
 
   - name: attitude_rate
     value: [0, 0, 0] # rad/s (10 rpm), This applies to non-montecarlo runs
@@ -271,10 +271,10 @@ controller_properties:
 
   magnetorquer_only:
     target_spin_stable_axis_body: [0.0, 0.0, 1.0] # Body frame, spin around +z
-    target_spin_rate: 1 # rad/s
+    target_spin_rate: 0.17 # rad/s
     target_pointing_axis_inertial: [1.0, 0.0, 0.0] # Inertial frame, sun direction
-    spin_stable_tolerance_rad: 0.2 # rad
-    pointing_tolerance_rad: 0.2
+    spin_stable_tolerance_rad: 0.30 # rad
+    pointing_tolerance_rad: 0.20
 
 sensor_properties:
   enabled: True
@@ -372,6 +372,9 @@ plotting_properties:
     value: True # show rho components in simulation and Monte Carlo plots
 
   - name: show_sun_safe_mode_axis_plot
+    value: True
+
+  - name: show_magnetorquer_target_axes_plot
     value: True
 
   - name: show_sensor_plot

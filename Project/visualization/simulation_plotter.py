@@ -20,6 +20,7 @@ from .common import (
 from world.rotations_and_transformations import (
     L,
     R_body_to_inertial,
+    inertial_to_body,
     normalize_quaternion,
     quaternion_to_euler,
 )
@@ -44,10 +45,12 @@ class SimulationPlotContext(Protocol):
     show_angular_velocity_plot: bool
     show_gyrostat_components: bool
     show_sun_safe_mode_axis_plot: bool
+    show_magnetorquer_target_axes_plot: bool
     show_sensor_plot: bool
     show_camera_measurement_plot: bool
     show_estimator_plot: bool
     sensor_targets: Mapping[str, np.ndarray]
+    controller: Any
     spacecraft: Any
     output_dir: Path | None
     config_path: Path
@@ -108,6 +111,8 @@ def simulation_plot_paths(
             "angular_velocity": root_dir / "simulation_angular_velocity.png",
             "rho": root_dir / "simulation_rho.png",
             "target_attitude": root_dir / "simulation_target_attitude.png",
+            "magnetorquer_target_axes": root_dir
+            / "simulation_magnetorquer_target_axes.png",
             "sun_safe_mode_axis": root_dir / "simulation_sun_safe_mode_axis.png",
             "sensors": root_dir / "simulation_sensors.png",
             "camera_measurements": root_dir / "simulation_camera_measurements.png",
@@ -136,6 +141,9 @@ def simulation_plot_paths(
                 "target_attitude": base_path.with_name(
                     f"{base_path.stem}_target_attitude{base_path.suffix}"
                 ),
+                "magnetorquer_target_axes": base_path.with_name(
+                    f"{base_path.stem}_magnetorquer_target_axes{base_path.suffix}"
+                ),
                 "environmental_torque": base_path.with_name(
                     f"{base_path.stem}_environmental_torque{base_path.suffix}"
                 ),
@@ -150,6 +158,8 @@ def simulation_plot_paths(
             "camera_measurements": base_path / "simulation_camera_measurements.png",
             "estimator": base_path / "simulation_estimator.png",
             "target_attitude": base_path / "simulation_target_attitude.png",
+            "magnetorquer_target_axes": base_path
+            / "simulation_magnetorquer_target_axes.png",
             "environmental_torque": base_path / "simulation_environmental_torque.png",
             "gyro_mag_torque": base_path / "simulation_gyro_mag_torques.png",
         }
@@ -165,6 +175,8 @@ def simulation_plot_paths(
             "angular_velocity": root_dir / f"{prefix}_angular_velocity.png",
             "rho": root_dir / f"{prefix}_rho.png",
             "target_attitude": root_dir / f"{prefix}_target_attitude.png",
+            "magnetorquer_target_axes": root_dir
+            / f"{prefix}_magnetorquer_target_axes.png",
             "sun_safe_mode_axis": root_dir / f"{prefix}_sun_safe_mode_axis.png",
             "sensors": root_dir / f"{prefix}_sensors.png",
             "camera_measurements": root_dir / f"{prefix}_camera_measurements.png",
@@ -180,6 +192,8 @@ def simulation_plot_paths(
         "angular_velocity": base_path / "simulation_angular_velocity.png",
         "rho": base_path / "simulation_rho.png",
         "target_attitude": base_path / "simulation_target_attitude.png",
+        "magnetorquer_target_axes": base_path
+        / "simulation_magnetorquer_target_axes.png",
         "sun_safe_mode_axis": base_path / "simulation_sun_safe_mode_axis.png",
         "sensors": base_path / "simulation_sensors.png",
         "camera_measurements": base_path / "simulation_camera_measurements.png",
@@ -602,6 +616,195 @@ def plot_target_attitude_figure(
     axes[1].set_xlabel("time [s]")
     axes[1].set_ylabel("angle error [deg]")
     axes[1].set_title("Angular Error to Configured Target")
+
+    fig.tight_layout()
+    return fig
+
+
+def _unit_rows_or_nan(vectors: np.ndarray) -> np.ndarray:
+    values = np.asarray(vectors, dtype=float)
+    norms = np.linalg.norm(values, axis=1, keepdims=True)
+    unit_values = np.full_like(values, np.nan, dtype=float)
+    valid = norms[:, 0] > 1e-12
+    unit_values[valid] = values[valid] / norms[valid]
+    return unit_values
+
+
+def magnetorquer_target_axis_values(
+    attitudes: np.ndarray,
+    angular_rates_body: np.ndarray,
+    target_spin_axis_body: np.ndarray,
+    target_pointing_axis_inertial: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    spin_axis_body = _unit_rows_or_nan(angular_rates_body)
+
+    target_spin_axis_body = np.asarray(target_spin_axis_body, dtype=float).reshape(3)
+    target_spin_axis_body = target_spin_axis_body / np.linalg.norm(
+        target_spin_axis_body
+    )
+
+    target_pointing_axis_inertial = np.asarray(
+        target_pointing_axis_inertial, dtype=float
+    ).reshape(3)
+    target_pointing_axis_inertial = target_pointing_axis_inertial / np.linalg.norm(
+        target_pointing_axis_inertial
+    )
+    target_pointing_axis_body = np.asarray(
+        [
+            inertial_to_body(q / np.linalg.norm(q), target_pointing_axis_inertial)
+            for q in np.asarray(attitudes, dtype=float)
+        ],
+        dtype=float,
+    )
+    target_pointing_axis_body = _unit_rows_or_nan(target_pointing_axis_body)
+
+    target_spin_alignment = np.clip(spin_axis_body @ target_spin_axis_body, -1.0, 1.0)
+    pointing_alignment = np.clip(
+        np.sum(spin_axis_body * target_pointing_axis_body, axis=1), -1.0, 1.0
+    )
+    target_spin_error_deg = np.rad2deg(np.arccos(target_spin_alignment))
+    pointing_error_deg = np.rad2deg(np.arccos(pointing_alignment))
+    axis_errors_deg = np.column_stack((target_spin_error_deg, pointing_error_deg))
+
+    return (
+        spin_axis_body,
+        target_spin_axis_body,
+        target_pointing_axis_body,
+        axis_errors_deg,
+    )
+
+
+def plot_magnetorquer_target_axes_figure(
+    times: np.ndarray,
+    attitudes: np.ndarray,
+    angular_rates_body: np.ndarray,
+    inertia_tensor: np.ndarray,
+    momentum_target_body: np.ndarray,
+    target_spin_axis_body: np.ndarray,
+    target_pointing_axis_inertial: np.ndarray,
+    spin_stable_tolerance: float,
+    pointing_tolerance: float,
+) -> plt.Figure:
+    (
+        spin_axis_body,
+        target_spin_axis_body,
+        target_pointing_axis_body,
+        axis_errors_deg,
+    ) = magnetorquer_target_axis_values(
+        attitudes,
+        angular_rates_body,
+        target_spin_axis_body,
+        target_pointing_axis_inertial,
+    )
+
+    inertia_tensor = np.asarray(inertia_tensor, dtype=float).reshape(3, 3)
+    momentum_target_body = np.asarray(momentum_target_body, dtype=float).reshape(3)
+    h_tgt_norm = np.linalg.norm(momentum_target_body)
+    h_body = (inertia_tensor @ np.asarray(angular_rates_body, dtype=float).T).T
+    if h_tgt_norm > 1e-12:
+        h_heuristic = h_body / h_tgt_norm
+        switching_errors = np.column_stack(
+            (
+                np.linalg.norm(h_heuristic - target_spin_axis_body, axis=1),
+                np.linalg.norm(h_heuristic - target_pointing_axis_body, axis=1),
+            )
+        )
+    else:
+        switching_errors = np.full((times.size, 2), np.nan, dtype=float)
+
+    fig, axes = plt.subplots(
+        3, 1, figsize=(12, 9), facecolor=FIGURE_FACE_COLOR, sharex=True
+    )
+    component_colors = ["#dc2626", "#16a34a", "#2563eb"]
+    component_labels = ["x", "y", "z"]
+    target_spin_history = np.tile(target_spin_axis_body, (times.size, 1))
+
+    style_time_axis(axes[0])
+    for i, label in enumerate(component_labels):
+        axes[0].plot(
+            times,
+            spin_axis_body[:, i],
+            color=component_colors[i],
+            linewidth=1.7,
+            label=f"spin {label}",
+        )
+        axes[0].plot(
+            times,
+            target_spin_history[:, i],
+            color=component_colors[i],
+            linewidth=1.1,
+            linestyle="--",
+            alpha=0.75,
+            label=f"target spin {label}",
+        )
+        axes[0].plot(
+            times,
+            target_pointing_axis_body[:, i],
+            color=component_colors[i],
+            linewidth=1.2,
+            linestyle=":",
+            alpha=0.9,
+            label=f"target ref {label}",
+        )
+    axes[0].set_title("Magnetorquer Target Axes in Body Frame")
+    axes[0].set_ylabel("component [-]")
+    axes[0].legend(loc="upper right", ncol=3, fontsize=8)
+
+    style_time_axis(axes[1])
+    axes[1].plot(
+        times,
+        axis_errors_deg[:, 0],
+        color="#0f172a",
+        linewidth=1.7,
+        label="spin axis to target spin",
+    )
+    axes[1].plot(
+        times,
+        axis_errors_deg[:, 1],
+        color="#7c3aed",
+        linewidth=1.7,
+        label="spin axis to target ECI reference",
+    )
+    axes[1].set_title("Target Axis Separation")
+    axes[1].set_xlabel("time [s]")
+    axes[1].set_ylabel("angle [deg]")
+    axes[1].legend(loc="upper right")
+
+    style_time_axis(axes[2])
+    axes[2].plot(
+        times,
+        switching_errors[:, 0],
+        color="#0f172a",
+        linewidth=1.7,
+        label="spin metric ||a - h/h_tgt_norm||",
+    )
+    axes[2].plot(
+        times,
+        switching_errors[:, 1],
+        color="#7c3aed",
+        linewidth=1.7,
+        label="pointing metric ||s - h/h_tgt_norm||",
+    )
+    axes[2].axhline(
+        float(spin_stable_tolerance),
+        color="#0f172a",
+        linestyle="--",
+        linewidth=1.1,
+        alpha=0.85,
+        label="spin tolerance",
+    )
+    axes[2].axhline(
+        float(pointing_tolerance),
+        color="#7c3aed",
+        linestyle="--",
+        linewidth=1.1,
+        alpha=0.85,
+        label="pointing tolerance",
+    )
+    axes[2].set_title("Controller Switching Metrics")
+    axes[2].set_xlabel("time [s]")
+    axes[2].set_ylabel("metric [-]")
+    axes[2].legend(loc="upper right", ncol=2, fontsize=8)
 
     fig.tight_layout()
     return fig
@@ -1573,6 +1776,26 @@ def plot_simulation(
                 times, att, target_attitude_array
             )
 
+    magnetorquer_target_axes_fig = None
+    controller = getattr(ctx, "controller", None)
+    target_spin_axis_body = getattr(controller, "target_spin_stable_axis_body", None)
+    target_pointing_axis_inertial = getattr(
+        controller, "target_pointing_axis_inertial", None
+    )
+    if target_spin_axis_body is not None and target_pointing_axis_inertial is not None:
+        if getattr(ctx, "show_magnetorquer_target_axes_plot", True):
+            magnetorquer_target_axes_fig = plot_magnetorquer_target_axes_figure(
+                times,
+                att,
+                att_rate,
+                np.asarray(controller.inertia_tensor, dtype=float),
+                np.asarray(controller.momentum_target, dtype=float),
+                np.asarray(target_spin_axis_body, dtype=float),
+                np.asarray(target_pointing_axis_inertial, dtype=float),
+                float(controller.spin_stable_tolerance),
+                float(controller.pointing_tolerance),
+            )
+
     if ctx.plot_layout == "together":
         fig = None
         if ctx.show_simulation_overview:
@@ -1624,6 +1847,13 @@ def plot_simulation(
                 plot_paths["target_attitude"],
                 "Target attitude tracking plot saved",
             )
+        if magnetorquer_target_axes_fig is not None:
+            save_figure(
+                ctx.logger,
+                magnetorquer_target_axes_fig,
+                plot_paths["magnetorquer_target_axes"],
+                "Magnetorquer target-axis plot saved",
+            )
         if gyro_mag_torque_fig is not None:
             save_figure(
                 ctx.logger,
@@ -1645,6 +1875,7 @@ def plot_simulation(
                 or estimator_fig
                 or environmental_torque_fig
                 or target_attitude_fig
+                or magnetorquer_target_axes_fig
                 or gyro_mag_torque_fig
                 or {}
             )
@@ -1707,6 +1938,8 @@ def plot_simulation(
         figures["environmental_torque"] = environmental_torque_fig
     if target_attitude_fig is not None:
         figures["target_attitude"] = target_attitude_fig
+    if magnetorquer_target_axes_fig is not None:
+        figures["magnetorquer_target_axes"] = magnetorquer_target_axes_fig
     if gyro_mag_torque_fig is not None:
         figures["gyro_mag_torque"] = gyro_mag_torque_fig
     if ctx.show_gyrostat_components:
@@ -1804,6 +2037,13 @@ def plot_simulation(
             figures["target_attitude"],
             plot_paths["target_attitude"],
             "Target attitude tracking plot saved",
+        )
+    if "magnetorquer_target_axes" in figures:
+        save_figure(
+            ctx.logger,
+            figures["magnetorquer_target_axes"],
+            plot_paths["magnetorquer_target_axes"],
+            "Magnetorquer target-axis plot saved",
         )
     if "gyro_mag_torque" in figures:
         save_figure(

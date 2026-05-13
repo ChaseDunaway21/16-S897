@@ -7,9 +7,12 @@ from __future__ import annotations
 import numpy as np
 
 
-def unit_vector(v: np.ndarray) -> np.ndarray:
+def unit_vector(v: np.ndarray, field_name: str = "vector") -> np.ndarray:
     vector = np.asarray(v, dtype=float)
-    return vector / np.linalg.norm(vector)
+    norm = np.linalg.norm(vector)
+    if norm <= 1e-12:
+        raise ValueError(f"{field_name} must be a nonzero vector")
+    return vector / norm
 
 
 def unit_rows(vectors: np.ndarray) -> np.ndarray:

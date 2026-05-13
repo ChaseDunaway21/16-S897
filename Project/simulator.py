@@ -182,6 +182,11 @@ class Simulator:
             "show_sun_safe_mode_axis_plot",
             True,
         )
+        self.show_magnetorquer_target_axes_plot = self._property_bool(
+            plotting_properties,
+            "show_magnetorquer_target_axes_plot",
+            True,
+        )
         self.show_sensor_plot = self._property_bool(
             plotting_properties,
             "show_sensor_plot",

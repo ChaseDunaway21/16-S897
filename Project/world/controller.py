@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.linalg import expm
 
-from world.math_utils import matrix_from_config, skew_symmetric
+from world.math_utils import matrix_from_config, skew_symmetric, unit_vector
 from world.rotations_and_transformations import (
     L,
     short_quaternion,
@@ -473,13 +473,13 @@ class MagnetorquerOnlyController:
         inertia_tensor: np.ndarray | None = None,
         max_voltage: float = 8.4,
     ) -> None:
-        self.target_spin_stable_axis_body = self._unit_vector(
+        self.target_spin_stable_axis_body = unit_vector(
             [0.0, 0.0, 1.0]
             if target_spin_stable_axis_body is None
             else target_spin_stable_axis_body,
             "target_spin_stable_axis_body",
         )
-        self.target_pointing_axis_inertial = self._unit_vector(
+        self.target_pointing_axis_inertial = unit_vector(
             [1.0, 0.0, 0.0]
             if target_pointing_axis_inertial is None
             else target_pointing_axis_inertial,
@@ -514,14 +514,6 @@ class MagnetorquerOnlyController:
         self.pointing_tolerance = angle_to_unit_vector_distance(pointing_tolerance_rad)
         self.max_voltage = float(max_voltage)
         self.momentum_target = self.inertia_tensor @ self.target_rate_body
-
-    @staticmethod
-    def _unit_vector(vector: np.ndarray, field_name: str) -> np.ndarray:
-        vector = np.asarray(vector, dtype=float).reshape(3)
-        norm = np.linalg.norm(vector)
-        if norm <= 1e-12:
-            raise ValueError(f"{field_name} must be a nonzero vector")
-        return vector / norm
 
     def _alpha_gain(
         self,
@@ -589,6 +581,7 @@ class MagnetorquerOnlyController:
         s = s / np.linalg.norm(s)
 
         # From [1]
+        voltage_command = np.zeros(3, dtype=float)
         if np.linalg.norm(a - h_heuristic) > self.spin_stable_tolerance:
             command_prime_b = b_hat @ (h_tgt - h)
             command_prime_norm = np.linalg.norm(command_prime_b)
