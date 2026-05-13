@@ -14,6 +14,7 @@
 \usepackage{subcaption}
 \usepackage{multirow}
 \usepackage{placeins} % provides \FloatBarrier to control float placement
+\usepackage[ruled]{algorithm2e}
 
 % Larger heading font sizes
 \titleformat{\section}{\normalfont\LARGE\bfseries}{\thesection}{1em}{}
@@ -39,10 +40,11 @@
   \begin{tabularx}{\textwidth}{@{}l l l >{\raggedright\arraybackslash}X@{}}
     \textbf{Version} & \textbf{Date} & \textbf{Author} & \textbf{Changes} \\
     \hline
-    \changelogentry{v1.0}{2026-04-14}{Chase Dunaway}{Initial draft. Homework 1 submission. This is the Introduction, the Spacecraft model definition/config, the simulator dynamcis, and Euler's Equation.}
+    \changelogentry{v1.0}{2026-04-14}{Chase Dunaway}{Initial draft. Homework 1 submission. This is the Introduction, the Spacecraft model definition/config, the simulator dynamics, and Euler's Equation.}
     \changelogentry{v2.0}{2026-05-09}{Chase Dunaway}{Homework 2 submission. This includes the Safe-Mode, implementation of the gyrostat into the simulator, sensor models, and Wahba's Problem. Momentum sphere plots were updated to also show energy gradient.}
-    \changelogentry{v3.0}{2026-05-10}{Chase Dunaway}{ARGUS Satellite Images/Homework 3 submission. This includes the affine sensor models and the MEKF analysis. Also fix unit error from Homework 2 related to the BMX160 datasheet.}
-    \changelogentry{v4.0}{2026-05-10}{Chase Dunaway}{ARGUS Satellite Images/Homework 4 submission. This includes the actuator specifications, environmental torques, attitude regulation, and eigen-axis slew. Also corrected the state vector since it's changed in Homework 1, and added the new state vector to the Spacecraft Dynamics section.}
+    \changelogentry{v3.0}{2026-05-10}{Chase Dunaway}{Homework 3 submission. This includes the affine sensor models and the MEKF analysis. Also fix unit error from Homework 2 related to the BMX160 datasheet.}
+    \changelogentry{v4.0}{2026-05-10}{Chase Dunaway}{Homework 4 submission. This includes the actuator specifications, environmental torques, attitude regulation, and eigen-axis slew. Also corrected the state vector since it's changed in Homework 1, and added the new state vector to the Spacecraft Dynamics section.}
+    \changelogentry{v5.0}{2026-05-13}{Chase Dunaway}{Homework 5 submission. Added the Lyapunov Momentum-Pointing Controller to the sim and validated the results. Also added error histogram to Wahba's Problem section, fixed accumulated torque plot captions, and corrected typos.}
   \end{tabularx}
 }
 
@@ -65,10 +67,10 @@
 
 \newpage
 \tableofcontents
-\newpage
+\clearpage
 
 \section{Introduction}
-ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination using images of Earth's surface captured by the spacecraft\footnote{Much of the following report is heavily motivated by the implementation details of the ongoing ARGUS development simulator.} It is planned for launch in the Summer of 2026.
+ARGUS is a 1U CubeSat designed to demonstrate on-board orbit determination using images of Earth's surface captured by the spacecraft.\footnote{Much of the following report is heavily motivated by the implementation details of the ongoing ARGUS development simulator.} It is planned for launch in the Summer of 2026.
 
 \begin{figure}[ht]
   \centering
@@ -78,10 +80,10 @@ ARGUS is a 1U CubeSat  designed to demonstrate on-board orbit determination usin
 \end{figure}
 
 \subsection{Mission Purpose}
-The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components, can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat} GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies which have been mapped but do not have existing positioning systems such as the moon could utilize the vision-based orbit determination system as ARGUS. 
+The primary purpose of ARGUS is to demonstrate that a 1U CubeSat using minimal, off-the-shelf components can solve the lost-in-space problem using images of the Earth captured by the satellite in orbit~\cite{mccleary2024vinsat}. GPS used in orbit or ground-based radar can be prohibitively expensive for low-cost missions. Moreover, bodies that have been mapped but do not have existing positioning systems (e.g., the Moon) could utilize a vision-based orbit-determination system like ARGUS.
 
 \subsection{Orbit Description}
-ARGUS is planned for launch in Summer 2026 and deployment into a sun-synchronous low Earth orbit with an altitude of approximately $600$ km and an inclination of approximately $100^\circ$.
+ARGUS is planned for launch in Summer 2026 and deployment into a Sun-synchronous low Earth orbit with an altitude of approximately $600$ km and an inclination of approximately $100^{\circ}$.
 
 
 \subsection{Mission Requirements and Objectives}
@@ -103,25 +105,25 @@ At a high level, ARGUS will operate as a state-machine.
     \item Detumbling.
     \item If spin-rate > threshold || Sun-vector axis > 10 deg nominal -> Spin-Stabilization.
     \item If batteries > minimum threshold -> Nominal operations, image collection, model inference, and orbit determination.
-    \item If batters < minimum threshold -> Disable all non-essential components and recharge batteries.
+    \item If batteries < minimum threshold -> Disable all non-essential components and recharge batteries.
 \end{enumerate}
 
 \subsection{Mechanical Structure}
 For the purposes of this report, ARGUS is modeled as a uniformly dense 1U cube with four deployable panels. The geometry of the main chassis and the deployed panels are included to capture the effect of the panels on the spacecraft mass properties, inertia matrix, and environmental torque model.
 
 \subsection{Sensors}
-The sensor suite consists of a 9-axis Bosch BMX160 IMU~\cite{bosch2018bmx160}, a SkyTraq S1216F8-GL GNSS receiver, nine OPT4003 photodiode sun sensors~\cite{ti_opt4003q1_2026}, and four Arducam (IMX708) Raspberry Pi Camera Module 3 cameras~\cite{arducam_imx708_2026} with a $75^\circ$ field of view. The magnetometer measurements and gyroscope measurements will be used for detumbling, with the gyroscope measurements also being used for orbit determination. The GNSS receiver will provide timing and a positional baseline to compare against. The sun sensors will be used for sun-pointing. Finally, the cameras will be used to take roughly nadir pointing photos of Earth's surface for inference and orbit determination.
+The sensor suite consists of a 9-axis Bosch BMX160 IMU~\cite{bosch2018bmx160}, a SkyTraq S1216F8-GL GNSS receiver, nine OPT4003 photodiode Sun sensors~\cite{ti_opt4003q1_2026}, and four Arducam (IMX708) Raspberry Pi Camera Module 3 cameras~\cite{arducam_imx708_2026} with a $75^\circ$ field of view. The magnetometer measurements and gyroscope measurements will be used for detumbling, with the gyroscope measurements also being used for orbit determination. The GNSS receiver will provide timing and a positional baseline to compare against. The Sun sensors will be used for Sunpointing. Finally, the cameras will be used to take roughly nadir pointing photos of Earth's surface for inference and orbit determination.
 
 \subsection{Actuators}
 The attitude control system consists of six magnetorquers arranged in each of the six faces of the main body. These are used for initial detumbling and control.
 
 % \newpage  % removed to avoid forcing the configuration listing onto its own page
 
-\newpage
+\clearpage
 \section{Spacecraft Model}
 
 \subsection{ARGUS Model}
-ARGUS is modeled as a collection a main, uniform-density cube and $4$ rigid components defined in the configuration file. For each component $i$, the configuration specifies a mass $m_i$, a geometric center $\mathbf{r}_i \in \mathbb{R}^3$, and a set of exposed faces with dimensions and outward normals.
+ARGUS is modeled as a collection of a main, uniform-density cube and $4$ rigid components defined in the configuration file. For each component $i$, the configuration specifies a mass $m_i$, a geometric center $\mathbf{r}_i \in \mathbb{R}^3$, and a set of exposed faces with dimensions and outward normals.
 
 \subsection{Discretization \& Configuration File}
 The spacecraft model, initial conditions, and simulation settings are defined in a YAML configuration file. The approximate model and config file (units are in SI) are shown below, with the origin being specified in the center of the main body:
@@ -294,7 +296,7 @@ physical_properties:
 \subsection{Moment of Inertia}\label{subsec:moment-of-inertia}
 ARGUS's total mass is the sum of the main body and four deployables:
 \begin{equation}
-M = \sum_{i=1}^{N} m_i .
+M = \sum_{i=1}^{N} m_i
 \end{equation}
 
 The center of mass is determined by:
@@ -436,18 +438,18 @@ Each exposed face is represented by a centroid, an outward unit normal, and an a
 
 The configuration file stores the face normals $\mathbf{n}_{ij}$ and geometric data needed for future use.
 
-\newpage
+\clearpage
 \section{Dynamics}
 
 \subsection{System State}
 The full spacecraft state is
-\begin{equation}
+\[
 \mathbf{x} =
 \begin{bmatrix}
 \mathbf{q} \\ \boldsymbol{\omega} \\ \mathbf{r} \\ \mathbf{\dot{r}} 
 \end{bmatrix}
 \in \mathbb{R}^{13}
-\end{equation}
+\]
 where $\mathbf{r}$ is position, $\mathbf{\dot{r}}$ is velocity, $\mathbf{q} = [q_0\ q_1\ q_2\ q_3]^T$ is a scalar-first quaternion, and $\boldsymbol{\omega} = [\omega_x\ \omega_y\ \omega_z]^T$ is the body angular velocity.
 
 \subsection{Initialization from Orbital Elements}
@@ -513,7 +515,7 @@ The attitude kinematics are written using quaternions
 \begin{equation}
 \mathbf{\dot{q}} = \frac{1}{2}\mathbf{G(q)}\boldsymbol{\omega},
 \end{equation}
-Where $\mathbf{G(q)}$ is the attitude quaternion
+Where $\mathbf{G(q)}$ is the attitude Jacobian
 
 \begin{equation}
 \mathbf{\dot{q}}
@@ -546,7 +548,7 @@ with the quaternion being normalized after each iteration $\|\mathbf{q}\|=1$.
   \label{fig:orbit-trajectory}
 \end{figure}
 
-\newpage
+\clearpage
 \section{Euler's Equation}
 
 \subsection{Rigid-Body Attitude Dynamics}
@@ -556,7 +558,7 @@ The dynamics for $\dot{\omega}$ are given with Euler's equation in the body fram
 \end{equation}
 Which is equivalent to:
 \begin{equation}
-\dot{\boldsymbol{\omega}} = -\mathbf{J}^{-1}\left(\boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega})\right).
+\dot{\boldsymbol{\omega}} = -\mathbf{J}^{-1}\left(\boldsymbol{\omega}\times(\mathbf{J}\boldsymbol{\omega})\right)
 \end{equation}
 
 \subsection{Angular Momentum and Momentum Sphere}
@@ -582,7 +584,7 @@ The equilibrium points correspond to rotation about the principal axes, i.e., di
   \begin{subfigure}[t]{0.48\linewidth}
     \centering
     \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/simulation_plot_100_e.png}}
-    \caption{100 Second simulation plotted with euler-angle attitude.}
+    \caption{100 Second simulation plotted with Euler-angle attitude.}
     \label{fig:sim-100-e}
   \end{subfigure}
   \caption{Attitude history plots from the nominal dynamics simulation.}
@@ -627,16 +629,16 @@ The equilibrium points correspond to rotation about the principal axes, i.e., di
 \begin{figure}[ht]
   \centering
   \includegraphics[width=0.95\linewidth]{\detokenize{ARGUS Satellite Images/Homework 1/monte_carlo_components.png}}
-  \caption{25 simulated runs deviated orbital inclinations and initial angular velocities.}
+  \caption{25 simulated runs with deviated orbital inclinations and initial angular velocities.}
   \label{fig:monte-carlo-components-inclination-omega}
 \end{figure}
 
 \clearpage
 \section{Safe-Mode}
 
-For satellites that operate autonomously, a "safe mode" can ensure the satellite obtains an attitude that maximizes its chance to recover while in an inhibited state. For example, a low battery could trigger this state and cause the satellite to attempt to point at the sun while turning off all but its necessary functionality while it recharges.
+For satellites that operate autonomously, a "safe mode" can ensure the satellite obtains an attitude that maximizes its chance to recover while in an inhibited state. For example, a low battery could trigger this state and cause the satellite to attempt to point at the Sun while turning off all but its necessary functionality while it recharges.
 
-In the case of this simulated ARGUS, the greater area for solar power generation is by pointing the +z-axis towards the sun. However, in this ARGUS only has magnetorquers, so in this report the simulated satellite differs.
+In the case of this simulated ARGUS, the greater area for solar power generation is achieved by pointing the +z-axis toward the Sun. However, ARGUS only has magnetorquers, so the simulated satellite in this report differs from that ideal case.
 
 \subsection{Modified Euler's Equation}
 
@@ -739,7 +741,7 @@ Solving for the required rotor momentum gives
 \omega_0
 \left(
 J_{\mathrm{eff}}-J_{22}
-\right).
+\right)
 \end{equation}
 
 \subsection{Dynamic Balance}
@@ -760,10 +762,10 @@ J\boldsymbol{\omega}_d
 
 Equivalently,
 \begin{equation}
-\boldsymbol{\omega}_d^\times \boldsymbol{\rho}
+\boldsymbol{\hat{\omega}}_d \boldsymbol{\rho}
 =
 -
-\boldsymbol{\omega}_d^\times J\boldsymbol{\omega}_d 
+\boldsymbol{\hat{\omega}}_d J\boldsymbol{\omega}_d 
 \end{equation}
 
 The inertia about the desired spin axis is
@@ -802,13 +804,13 @@ condition gives the overdetermined linear system
 \begin{equation}
 \begin{bmatrix}
 \boldsymbol{\omega}_d^T\\
-\boldsymbol{\omega}_d^\times
+\boldsymbol{\hat{\omega}}_d
 \end{bmatrix}
 \boldsymbol{\rho}
 =
 \begin{bmatrix}
 \omega_s\rho_s\\
--\boldsymbol{\omega}_d^\times J\boldsymbol{\omega}_d
+-\boldsymbol{\hat{\omega}}_d J\boldsymbol{\omega}_d
 \end{bmatrix}
 \end{equation}
 
@@ -836,6 +838,7 @@ After adding this to the simulation, I calculated the following $\boldsymbol{\rh
 }
 \end{equation}
 
+\clearpage
 \section{Spacecraft Dynamics}
 \subsection{Mass Perturbation}
 The random perturbations were added as described in the homework.
@@ -870,8 +873,6 @@ Where $\hat{\boldsymbol{\eta}}$ denotes the skew-symmetric (``hat'') matrix form
 \tilde V\tilde D\tilde V^T
 \end{equation}
 
-And the new state vector is
-
 The total spacecraft dynamics state is
 \[
 \mathbf{x} = \begin{bmatrix}
@@ -905,9 +906,8 @@ The total spacecraft dynamics state is
 \end{figure}
 
 
-\footnotetext{The momentum-sphere has a color gradient representing the rotational kinetic energy~\cite{markley2014fundamentals}. For a gyrostat, the total body-frame angular momentum is
-Since \(\boldsymbol{\omega}=J^{-1}(\mathbf h_B-\boldsymbol{\rho})\), the
-rigid-body kinetic energy for a fixed angular-momentum magnitude is
+\footnotetext{The momentum-sphere has a color gradient representing the rotational kinetic energy~\cite{markley2014fundamentals}. For a gyrostat, \(\boldsymbol{\omega}=J^{-1}(\mathbf h_B-\boldsymbol{\rho})\), the
+rigid-body kinetic energy for a fixed angular-momentum magnitude is:
 \[
 T
 =
@@ -929,13 +929,13 @@ J^{-1}
   \centering
   \includegraphics[width=0.65\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_sun_safe_mode_axis.png}}
   \caption{Safe-Mode Attitude Error}
-  \label{fig:hw2-sun-safe-mode-axis}
+  \label{fig:hw2-Sunsafe-mode-axis}
 \end{figure}
 
 \clearpage
 \section{Attitude Sensors}
 
-ARGUS uses a Bosch BMX160 IMU~\cite{bosch2018bmx160} that contains an accelerometer, gyroscope, and magnetometer, a set of OPT4003 photodiode sun sensors~\cite{ti_opt4003q1_2026} for sunpointing, and a suite of Arducam (IMX708) visual-band cameras~\cite{arducam_imx708_2026} for relative navigation using landmarks.
+ARGUS uses a Bosch BMX160 IMU~\cite{bosch2018bmx160} that contains an accelerometer, gyroscope, and magnetometer, a set of OPT4003 photodiode Sun sensors~\cite{ti_opt4003q1_2026} for sunpointing, and a suite of Arducam (IMX708) visual-band cameras~\cite{arducam_imx708_2026} for relative navigation using landmarks.
 
 In order to generate accurate measurements, several models are used for each of the sensors. For all of these models among many other parts of this simulator, the GNC-Simulation repository~\cite{cmuArgusGncSimulation} was a key influence.\footnote{Many of the simulation tools used for simulating ARGUS have been transferred for this simulator and report, since my original goal was to rewrite the simulator in Python.}
 
@@ -1031,7 +1031,7 @@ The datasheet specifies a gyroscope bias stability of $3~\mathrm{deg/hr}$, which
 $$
 3~\mathrm{deg/hr}
 =
-1.45\times10^{-5}~\mathrm{rad/s}.
+1.45\times10^{-5}~\mathrm{rad/s}
 $$
 
 If this rate were constant over one hour, then the random-walk bias estimate in $\mathrm{rad/s}/\sqrt{s}$ is:
@@ -1047,25 +1047,24 @@ $$
 
 Similarly, the magnetometer output noise in the datasheet is on the order of $\sim 1.4~\mu\mathrm{T}$ RMS (at low power mode), corresponding to a variance of roughly $(1.4~\mu\mathrm{T})^2 \approx 1.96~\mu\mathrm{T}^2$.
 
-In practice, this is not the case. Both of these numbers are substantially lower than the true measured output my sample BMX160. 
+In practice, this is not the case. Both of these numbers are significantly lower than the true measured output of my sample BMX160. 
 
 To get a better representation, I collected 14 hours worth of data and calculated the actual covariance and bias of the IMU using \texttt{allantools}.
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.8\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/imu_sensor_plot.png}}
+  \includegraphics[width=0.9\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/imu_sensor_plot.png}}
   \caption{Raw BMX160 IMU measurement time series used for noise characterization.}
   \label{fig:imu-sensor-plot}
 \end{figure}
 
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=0.8\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/imu_allan_deviation.png}}
+  \includegraphics[width=0.95\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/imu_allan_deviation.png}}
   \caption{Allan deviation computed from the BMX160 IMU data using \texttt{allantools}.}
   \label{fig:imu-allan-deviation}
 \end{figure}
 
-\clearpage
 The measured covariance and biases were as follows:
 
 \begin{center}
@@ -1127,9 +1126,9 @@ The magnetic field model is generated using the IGRF-14 model~\cite{iaga2024igrf
 In the simulation, the OPT4003 Sun Sensors used on ARGUS are abstracted to instead give a bearing vector output instead of light intensity. A conservative estimate to how it will perform is $\sigma_{\theta} \approx 5^{\circ}$. It is set to have an update frequency of $0.1$ Hz.
 
 
-\subsection{Sun Model}
+\subsection{Sun Model}\label{sec:sun-model}
 
-The Sun model uses JPL/NAIF SPICE ~\cite{naifSpiceToolkit} as well as a Montenbruck--Gill conical shadow model~\cite{montenbruck2000satelliteOrbits} to allow for eclipse effects to be generated.
+The Sun model uses JPL/NAIF SPICE~\cite{naifSpiceToolkit} as well as a Montenbruck--Gill conical shadow model~\cite{montenbruck2000satelliteOrbits} to allow for eclipse effects to be generated.
 
 The Montenbruck--Gill conical shadow model is defined as so:
 
@@ -1211,7 +1210,7 @@ c < b-a,\\[6pt]
 
 \subsection{ArduCam 3 Cameras}
 
-Similarly to the Sun Sensor, the ArduCam 3 module is abstracted to give a bearing vector output. The role of the cameras is to take photos of landmarks and perform inference using vision models. As a result, the update rate for the cameras are arbitrarily set to $0.01$ Hz as it is unreasonable to have a high update rate for these measurements. However, the resolution of the images is high, with the bounding-boxes around many landmarks being small relative to $75^{\circ}$ F.o.V. Assuming a $10$ km error when nadir pointing, this gives $\sim0.5^{\circ}$ pointing accuracy, which is significantly higher than that of the coarse Sun Sensor.
+Similarly to the Sun sensor, the ArduCam 3 module is abstracted to give a bearing vector output. The role of the cameras is to take photos of landmarks and perform inference using vision models. As a result, the update rate for the cameras are arbitrarily set to $0.01$ Hz as it is unreasonable to have a high update rate for these measurements. However, the resolution of the images is high, with the bounding-boxes around many landmarks being small relative to $75^{\circ}$ F.o.V. Assuming a $10$ km error when nadir pointing, this gives $\sim0.5^{\circ}$ pointing accuracy, which is significantly higher than that of the coarse Sun sensor.
 
 \subsection{Earth-Camera Model}
 
@@ -1228,27 +1227,28 @@ W_b
 \left(
 I-\mathbf b\mathbf b^T
 \right)
+\label{eq: isosample}
 \end{equation}
 
 The variance $\sigma_{\theta}^2$ is set in the \texttt{config.yaml} file.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.90\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_sensors.png}}
+  \includegraphics[width=0.95\linewidth,height=0.50\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_sensors.png}}
   \caption{Sensor measurements over 20 minute simulation.}
   \label{fig:hw2-simulation-sensors}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.35\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_camera_measurements.png}}
+  \includegraphics[width=0.95\linewidth,height=0.35\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 2/simulation_camera_measurements.png}}
   \caption{Camera bearing-vector measurements over 20 minute simulation.}
   \label{fig:hw2-simulation-camera-measurements}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.90\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/18_orbit_simulation_sensors.png}}
+  \includegraphics[width=0.80\linewidth,height=0.5\textwidth]{\detokenize{ARGUS Satellite Images/Homework 2/18_orbit_simulation_sensors.png}}
   \caption{Sensor measurements over an 18-orbit simulation in safe-mode.}
   \label{fig:hw2-18-orbit-sensors}
 \end{figure}
@@ -1258,7 +1258,7 @@ The variance $\sigma_{\theta}^2$ is set in the \texttt{config.yaml} file.
 \section{Wahba's Problem}\label{sec:wahbas-problem}
 
 In class, Wahba's Problem was solved three ways: Singular-Value Decomposition (SVD), the q-Method, and Semi-Definite Programming (SDP). In my simulator I have implemented the SVD and SDP methods.
-\subsubsection{SVD Wahba Solution}
+\subsection{SVD Wahba Solution}
 
 Given body-frame measurements \(\mathbf b_i\) and inertial reference vectors
 \(\mathbf r_i\), first normalize each vector:
@@ -1322,7 +1322,7 @@ Thus, the SVD Wahba solution is
 \boxed{
 Q_{\mathrm{SVD}}
 =
-V.TMU^T
+V M U^T
 }
 \end{equation}
 where \(Q_{\mathrm{SVD}}\) 
@@ -1333,7 +1333,7 @@ where \(Q_{\mathrm{SVD}}\)
 Q_{\mathrm{SVD}}\hat{\mathbf r}_i
 \end{equation}
 
-\subsubsection{SDP Wahba Solution}
+\subsection{SDP Wahba Solution}
 
 Using the same attitude profile matrix
 \begin{equation}
@@ -1362,34 +1362,33 @@ Q & I
 }
 \end{equation}
 
-\subsubsection{Simulation}
+\subsection{Simulation}
 
-ARGUS is configured to have three sensors that output bearing-vector measurements. To simulate solving for attitude given the magnetometer, sun-sensor, and camera, monte-carlo campaigns were run with 100 trials.
+ARGUS is configured to have three sensors that output bearing-vector measurements. To simulate solving for attitude given the magnetometer, Sunsensor, and camera, monte-carlo campaigns were run with 100 trials.
 
 In the first case, the bearing measurements have no noise. Here the SVD, SDP, and truth align closely. In 100-trials, the maximum error was $0.00^{\circ}$ and the mean was $0.00^{\circ}$ for both the SVD and SDP methods.
 
-In the second case, the measurements have the configured noise. Here the SVD and SDP methods struggle, as the sun-sensor is only accurate to within $\sim5^{\circ}$. Also, in trials where two-measurements are nearly aligned, the solution is significantly further off. In 100-trials, the maximum error was $\sim28.3^{\circ}$ and the mean was $10.1^{\circ}$ for both the SVD and SDP methods.
+In the second case, the measurements have the configured noise. Here the SVD and SDP methods struggle, as the Sunsensor is only accurate to within $\sim5^{\circ}$. Also, in trials where two-measurements are nearly aligned, the solution is significantly further off. In 100-trials, the maximum error was $\sim28.3^{\circ}$ and the mean was $10.1^{\circ}$ for both the SVD and SDP methods.
 
-Something to note is that the measurements are weighted with identity when creating the $\boldsymbol{B}$ matrix. Weighting the camera measurement significantly higher would help, but even so the variance from the BMX160 and coarse Sun Sensor is still poor for precise attitude determination with only three measurements at any given timestep.
+Something to note is that the measurements are weighted with identity when creating the $\boldsymbol{B}$ matrix. Weighting the camera measurement significantly higher would help, but even so the variance from the BMX160 and coarse Sun sensor is still poor for precise attitude determination with only three measurements at any given timestep.
 
 \begin{figure}[H]
   \centering
+  \begin{subfigure}[H]{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_attitudes_clean.png}}
+    \caption{Recovered attitudes (noise-free measurements).}
+    \label{fig:wahba-mc-attitudes-clean}
+    \end{subfigure}
+  
+  \vspace{0.75em}
+
   \begin{subfigure}[t]{0.9\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo.png}}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_clean.png}}
     \caption{Monte Carlo results (noise-free measurements).}
     \label{fig:wahba-mc-clean}
   \end{subfigure}
-
-  \vspace{0.75em}
-
-  \begin{subfigure}[H]{0.9\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_attitudes.png}}
-    \caption{Recovered attitudes (noise-free measurements).}
-    \label{fig:wahba-mc-attitudes-clean}
-  \end{subfigure}
-
   \caption{Wahba Monte Carlo results (noise-free case).}
   \label{fig:wahba-mc-noisefree}
 \end{figure}
@@ -1398,20 +1397,19 @@ Something to note is that the measurements are weighted with identity when creat
   \centering
   \begin{subfigure}[t]{0.9\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_noisey.png}}
-    \caption{Monte Carlo results (noisy measurements).}
-    \label{fig:wahba-mc-noisy}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_attitudes_noisey.png}}
+    \caption{Recovered attitudes (noisy measurements).}
+    \label{fig:wahba-mc-attitudes-noisy}
   \end{subfigure}
 
   \vspace{0.75em}
 
   \begin{subfigure}[H]{0.9\linewidth}
     \centering
-    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_attitudes_noisey.png}}
-    \caption{Recovered attitudes (noisy measurements).}
-    \label{fig:wahba-mc-attitudes-noisy}
+    \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 2/wahba_monte_carlo_noisey.png}}
+    \caption{Monte Carlo results (noisy measurements).}
+    \label{fig:wahba-mc-noisy}
   \end{subfigure}
-
   \caption{Wahba Monte Carlo results (noisy case).}
   \label{fig:wahba-mc-noisycase}
 \end{figure}
@@ -1419,7 +1417,7 @@ Something to note is that the measurements are weighted with identity when creat
 \clearpage
 \section{Attitude Sensors Revisited}
 \subsection{Affine Sensor Models}
-Since the measurement models have already been implemented based on the true sensors on ARGUS, the only substantial change left is to add the affine form, which in this case is the matrix $\boldsymbol{M}$.
+Since the measurement models have already been implemented based on the true sensors on ARGUS, the only appreciable change left is to add the affine form, which in this case is the matrix $\boldsymbol{M}$.
 
 For the vector measurements, the following model is applied:
 \begin{equation}
@@ -1438,11 +1436,11 @@ For the gyroscope, the only difference is that b(t) is a random walk, and the me
 \end{equation}
 There is no star tracker measurement model since ARGUS does not utilize one.
 
-For all of these cases, I define $\boldsymbol{M}$ as the identity since the simulated measurements do not account for misalignment.
+For all of these cases, I define $\boldsymbol{M}$ as the identity since the simulated measurements do not account for misalignment in the linear model, but themselves used the aforementioned isotropic projection sampling method (eq. \ref{eq: isosample}) in generating the bearing measurements, and the Gyro having both an additive bias and random noise based on the measurements from my BMX160. See Figure \ref{fig:hw3-measurements}.
 
 \clearpage
 \section{Recursive Attitude Estimation}
-
+\subsection{MEKF Algorithm}
 \subsubsection{MEKF State}
 
 The MEKF state is
@@ -1517,7 +1515,7 @@ P_{k+1|k}
 =
 A_kP_{k|k}A_k^T
 +
-Q_k t
+Q_k
 \end{equation}
 
 The noise covariance is
@@ -1535,14 +1533,14 @@ The discrete error-state Jacobian
 \begin{equation}
 A_k
 =
-\frac{\partial  x_{k+1}}{\partial  x_k}
+\frac{\partial  \boldsymbol{x}_{k+1}}{\partial  \boldsymbol{x}_k}
 =
 \begin{bmatrix}
 \dfrac{\partial \boldsymbol{\phi}_{k+1}}
       {\partial \boldsymbol{\phi}_{k}}
 &
 \dfrac{\partial \boldsymbol{\phi}_{k+1}}
-      {\partial \boldsymbol{\beta}_{k}}
+      {\partial \boldsymbol{b}_{k}}
 \\[2ex]
     0
 &
@@ -1552,18 +1550,18 @@ A_k
 
 The top left block is
 
-\[
-\frac{\partial \phi_{k+1}}{\partial \phi_k}
+\begin{equation}
+\frac{\partial \boldsymbol{}{\phi}_{k+1}}{\partial \boldsymbol{}{\phi}_k}
 =
 G(q_{k+1|k})^T R(\Delta q_k)G(q_{k|k})
-\]
+\end{equation}
 
 
 The top right block is
 
 \begin{equation}
 \dfrac{\partial \boldsymbol{\phi}_{k+1}}
-      {\partial \Delta\mathbf b_{g,k}}
+      {\partial \mathbf b_{g,k}}
 =
 -\frac{1}{2}\Delta t\,
 G(q_{k|k})^TG(q_{k|k}).
@@ -1693,13 +1691,16 @@ Then, repeat and update the attitude quaternion and gyro bias.
 
 \subsection{Sample Rate}
 
+According to the Nyquist sampling theorem, the sampling rate should be at least twice as frequent as the highest-frequency signal. For many CubeSat missions, higher-than-expected tumbling from deployment could be disastrous. To be safe, assume that the maximum tumbling frequency is $\sim 100^{\circ}$ deg/s, corresponding to a period of $3.6$ seconds. In this scenario, the estimator would need to update at $\ge0.56$ Hz.
+
+
 Ideally, ARGUS would have the ability to slew accurately and quickly as it takes photos of Earth. Roughly, assume that ARGUS can capture a landmark and detect it as long as it is within $60^{\circ}$ of the axis directly nadir of a landmark. Also assume for best performance, the landmark or region needs to be completely centered. Given that the satellite may not pass directly over the landmark, it can be estimated that a ground pass inside the visibility window would last $\sim5$ minutes. 
 
-This corresponds to an accuracy of $0.007$ rad/s slew rate, which is on the same order of magnitude as the pointing accuracy of the camera $\sim 0.5^{\circ}$. As a result, the estimator should be configured to update at $\ge 1$ Hz.
+This corresponds to an accuracy of $0.007$ rad/s slew rate, which is on the same order of magnitude as the pointing accuracy of the camera $\sim 0.5^{\circ}$. As a result, if the goal is pointing accuracy, the estimator should be configured to update at $> 1$ Hz.
 
 \subsection{MEKF vs. Wahba's Problem}
 
-As the total number of estimates increases, the error converges to 0. In Wahba's Problem, the total number of measurements available at any specific point limited the accuracy of the solution. Moreover, in the scenario where two or more of bearing vectors aligned closely, the solution would suffer from a poor dilution of precision. Coupled with the coarseness of the Sun Sensor and the noisy BMX160, the mean error of the MEKF's solution would be significantly better only after a few timesteps as more measurements were collected (also noting that as the spacecraft is tumbling, the measurements are able to capture more geometric diversity). 
+As the total number of estimates increases, the error converges to 0. In Wahba's Problem, the total number of measurements available at any specific point limited the accuracy of the solution. Moreover, in the scenario where two or more of bearing vectors aligned closely, the solution would suffer from a poor dilution of precision. Coupled with the coarseness of the Sun sensor and the noisy BMX160, the mean error of the MEKF's solution would be significantly better only after a few timesteps as more measurements were collected (also noting that as the spacecraft is tumbling, the measurements are able to capture more geometric diversity). 
 
 \subsection{MEKF Consistency}
 
@@ -1711,7 +1712,7 @@ In testing, I found the attitude state of the MEKF struggles to converge quickly
 
 Relative to the attitude states, the gyro bias states converge quickly towards the true value regardless of the initial attitude.
 
-\begin{figure}[p]
+\begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 3/simulation_estimator_01.png}}
   \caption{Estimator performance for initial attitude error $< 10^{\circ}$.}
@@ -1735,13 +1736,14 @@ Relative to the attitude states, the gyro bias states converge quickly towards t
 \begin{figure}[p]
   \centering
   \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 3/simulation_sensors.png}}
-  \caption{Measurement history used by the MEKF simulations. Note that the x-axis for the sun sensor and cameras only start at the time of their first measurement. The simulation starts when the spacecraft is still partially eclipsed, the camera takes 100 seconds after the start of the simulation to make it's first measurement.}
+  \caption{Measurement history used by the MEKF simulations. Note that the x-axis for the Sun sensor and cameras only start at the time of their first measurement. The simulation starts when the spacecraft is still partially eclipsed, and the camera takes 100 seconds after the start of the simulation to make its first measurement.}
   \label{fig:hw3-measurements}
 \end{figure}
 
 \clearpage
 \section{Actuator Specifications}
 
+\subsection{Actuator Models}
 ARGUS does not currently have reaction wheels or control momentum gyros, it is magnetorquer only. For this report, I am simulating three completely orthogonal reaction wheels.
 
 Since ARGUS is 1U, two small reaction wheels were tested.
@@ -1761,29 +1763,50 @@ Since ARGUS is 1U, two small reaction wheels were tested.
   \end{tabular}
 \end{table}
 
+\begin{table}[H]
+  \centering
+  \caption{ARGUS magnetorquer properties.}
+  \label{tab:argus-magnetorquers}
+  \begin{tabular}{|l|c|}
+    \hline
+    \textbf{Property} & \textbf{Value} \\
+    \hline
+    Number of magnetorquers & 6 \\
+    \hline
+    Number of turns & 64 \\
+    \hline
+    Max voltage & 8.4\,V \\
+    \hline
+    Resistance & 25\,\,$\Omega$ \\
+    \hline
+    Cross-sectional area & $5.432\times 10^{-3}$\,m$^2$ \\
+    \hline
+  \end{tabular}
+\end{table}
+
 \subsubsection{Reaction Wheel Model}
 
 The control simulations use three orthogonal reaction wheels
-\[
+\begin{equation}
 \mathbf r_w = \begin{bmatrix} r_1\\r_2\\r_3 \end{bmatrix},\qquad
 B_w = G_{RW,b} = \begin{bmatrix} 1 & 0 & 0\\ 0 & 1 & 0\\ 0 & 0 & 1 \end{bmatrix},\qquad
 \mathbf p_{RW,1} = \begin{bmatrix} 0.09\\0\\0 \end{bmatrix},\quad
 \mathbf p_{RW,2} = \begin{bmatrix} 0\\0.09\\0 \end{bmatrix},\quad
 \mathbf p_{RW,3} = \begin{bmatrix} 0\\0\\0.09 \end{bmatrix}
-\]
+\end{equation}
 
 where $r_{\omega}$ is the reaction wheel momentum, $B_{\omega}$ is the reaction wheel jacobian, and $\mathbf{p}$ is the position vector.
 
 The corresponding body-frame torque and $\dot{\rho}$ is is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{RW} = -B_w\mathbf u,\qquad
 \dot{\boldsymbol{\rho}}_{RW} = B_w\dot{\mathbf r}_w = B_w\mathbf u
-\]
+\end{equation}
 
 \subsubsection{Magnetorquer Model}
 
 The simulator also includes a six-magnetorquer model. The magnetorquers are modeled to be in each panel of the main bus with the normal facing outward
-\[
+\begin{equation}
 G_{MTB,b}
 =
 \begin{bmatrix}
@@ -1791,51 +1814,51 @@ G_{MTB,b}
 0 & 0 & 1 & -1 & 0 & 0\\
 0 & 0 & 0 & 0 & 1 & -1
 \end{bmatrix}
-\]
+\end{equation}
 
 The commanded voltages are
-\[
+\begin{equation}
 \mathbf v =
 \begin{bmatrix}
 v_1&v_2&v_3&v_4&v_5&v_6
 \end{bmatrix}^T
-\]
+\end{equation}
 
 The coil currents are modeled as
-\[
+\begin{equation}
 \mathbf i
 =
 R_c^{-1}\mathbf v,
-\]
+\end{equation}
 
 The magnetic dipole moment generated by the six coils is
 Equivalently, the \(j\)-th coil magnetic moment is
-\[
+\begin{equation}
 \mathbf m_j
 =
 N A i_j \mathbf g_j,
-\]
+\end{equation}
 where \(N\) is the number of turns, \(A\) is the coil cross-sectional area, and \(\mathbf g_j\) is the \(j\)-th column of \(G_{MTB,b}\).
 
 The total magnetorquer torque is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{MTB}
 =
 \sum_{j=1}^{6}
 \mathbf m_j \times \mathbf B_b
-\]
+\end{equation}
 
 \subsection{Environmental Torques}
 
 There are three torques in the simulation: the Gravity-Gradient torque, the Solar Radiation Pressure (SRP), and the Drag forces. Since ARGUS will be at the intersection between where the drag and SRP forces dominate, both are included. Furthermore, both models are heavily influenced by the implementation in~\cite{cmuArgusGncSimulation}.
 
 With the environment models, the drag and SRP now influence the translational accelerations,
-\[
+\begin{equation}
 \dot{\mathbf r}_I
 =
 \mathbf v_I,
-\]
-\[
+\end{equation}
+\begin{equation}
 \dot{\mathbf v}_I
 =
 \mathbf a_g(\mathbf r_I)
@@ -1843,11 +1866,11 @@ With the environment models, the drag and SRP now influence the translational ac
 \mathbf a_D
 +
 \mathbf a_{SRP}
-\]
+\end{equation}
 
 The attitude dynamics follow the lecture notes Euler-Equation
 
-\[
+\begin{equation}
 J\dot{\boldsymbol{\omega}}
 +
 \hat{\boldsymbol{\omega}}
@@ -1860,10 +1883,10 @@ J\boldsymbol{\omega}
 \boldsymbol{\tau}_{env}
 +
 \boldsymbol{\tau}_{act}
-\]
+\end{equation}
 
-In other words.,
-\[
+In other words,
+\begin{equation}
 \dot{\boldsymbol{\omega}}
 =
 J^{-1}
@@ -1874,10 +1897,10 @@ J^{-1}
 -
 \hat{\boldsymbol{\omega}}\left(J\boldsymbol{\omega}+\boldsymbol{\rho}\right)
 \right]
-\]
+\end{equation}
 
 The total environmental torque is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{env}
 =
 \boldsymbol{\tau}_{GG}
@@ -1885,14 +1908,14 @@ The total environmental torque is
 \boldsymbol{\tau}_{D}
 +
 \boldsymbol{\tau}_{SRP}
-\]
+\end{equation}
 
 
 
 \subsubsection{Gravity-Gradient Torque}
 
 The gravity-gradient torque in the inertial frame is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{GG}
 =
 \frac{3\mu_E}{r^5}
@@ -1901,22 +1924,22 @@ The gravity-gradient torque in the inertial frame is
 \left(
 J_I\mathbf r_I
 \right)
-\]
+\end{equation}
 
 The corresponding body-frame torque is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{GG}
 =
 R(q)^T
 \boldsymbol{\tau}_{GG,I}
-\]
+\end{equation}
 
 \subsubsection{Atmospheric Drag Force and Torque}
 
 In the simulation, the $\texttt{config.yaml}$ contains the normal vector for the six external surfaces on the bus, plus two additional surfaces (+z and -z) for the deployables, given a total of fourteen surfaces.
 
 The area used by the drag model is the dot product between the inertial vector and the normal vector which are in the same direction times the area of that face.
-\[
+\begin{equation}
 A_{D,i}^{proj}
 =
 A_i
@@ -1926,25 +1949,25 @@ A_i
 \mathbf n_{i,I}^T
 \hat{\mathbf v}_I
 \right),
-\]
+\end{equation}
 where
-\[
+\begin{equation}
 \hat{\mathbf v}_I
 =
 \frac{\mathbf v_I}{\|\mathbf v_I\|}
-\]
+\end{equation}
 
-This is a na\"{\i}ve approximation since it does not count for occlusion/surfaces blocking each other. For instance, if the spacecraft's velocity is in the +z direction, both the full area of the deployables and the perpendicular face on the bus behind it are included. This results in the total torque and drag being a slight over approximation.
+This is a na\"{\i}ve approximation since it does not account for occlusion (surfaces blocking each other). For instance, if the spacecraft's velocity is in the +z direction, both the full area of the deployables and the perpendicular face on the bus behind it are included. This results in the total torque and drag being a slight over-approximation.
 
 The Harris--Priester atmospheric density model is represented as~\cite{harris1962upperAtmosphere}
-\[
+\begin{equation}
 \rho_{atm}
 =
 \rho_{HP}(\mathbf r_I,t)
-\]
+\end{equation}
 
 The drag force on each surface is
-\[
+\begin{equation}
 \mathbf F_{D,i,I}
 =
 -\frac{1}{2}
@@ -1953,47 +1976,47 @@ C_D
 A_{D,i}^{proj}
 \|\mathbf v_I\|
 \mathbf v_I
-\]
+\end{equation}
 
 The corresponding body-frame force is
-\[
+\begin{equation}
 \mathbf F_{D,i,B}
 =
 R(q)^T\mathbf F_{D,i,I}
-\]
+\end{equation}
 
 The total drag torque is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{D}
 =
 \sum_i
 \mathbf c_{i,B}
 \times
 \mathbf F_{D,i,B}
-\]
+\end{equation}
 Where $c_{i,B}$ is the center of mass.
 
 Lastly, the translational drag acceleration is
-\[
+\begin{equation}
 \mathbf a_D
 =
 \frac{1}{m}
 \sum_i
 \mathbf F_{D,i,I}
-\]
+\end{equation}
 
 \subsubsection{Solar Radiation Pressure Force and Torque}
 
 \(\mathbf r_{\odot,I}\) is the inertial Sun position the vector
 from the Sun to the spacecraft is
-\[
+\begin{equation}
 \mathbf s_{\odot\rightarrow sc,I}
 =
 \mathbf r_I-\mathbf r_{\odot,I}
-\]
+\end{equation}
 
 The corresponding unit vector is
-\[
+\begin{equation}
 \hat{\mathbf s}_{\odot\rightarrow sc,I}
 =
 \frac{
@@ -2001,17 +2024,17 @@ The corresponding unit vector is
 }{
 \|\mathbf s_{\odot\rightarrow sc,I}\|
 }
-\]
+\end{equation}
 
 The vector from the spacecraft to the Sun is
-\[
+\begin{equation}
 \hat{\mathbf s}_{sc\rightarrow\odot,I}
 =
 -\hat{\mathbf s}_{\odot\rightarrow sc,I}
-\]
+\end{equation}
 
 The solar-radiation pressure is modeled as
-\[
+\begin{equation}
 p_{\odot}
 =
 \frac{E_{\odot}}{c}
@@ -2020,11 +2043,11 @@ p_{\odot}
 \|\mathbf s_{\odot\rightarrow sc,I}\|
 }
 \right)^2,
-\]
+\end{equation}
 where \(E_{\odot}\) is the solar constant at 1 AU and \(c\) is the speed of light.
 
 The projected area of surface \(i\) toward the Sun is
-\[
+\begin{equation}
 A_{SRP,i}^{proj}
 =
 A_i
@@ -2034,11 +2057,11 @@ A_i
 \mathbf n_{i,I}^T
 \hat{\mathbf s}_{sc\rightarrow\odot,I}
 \right)
-\]
+\end{equation}
 
 Let \(\nu\in[0,1]\) be the eclipse illumination fraction. The SRP force on each
 surface is
-\[
+\begin{equation}
 \mathbf F_{SRP,i,I}
 =
 \nu
@@ -2046,74 +2069,74 @@ C_R
 p_{\odot}
 A_{SRP,i}^{proj}
 \hat{\mathbf s}_{\odot\rightarrow sc,I}
-\]
+\end{equation}
 
 The body-frame force is
-\[
+\begin{equation}
 \mathbf F_{SRP,i,B}
 =
 R(q)^T
 \mathbf F_{SRP,i,I}
-\]
+\end{equation}
 
 The SRP torque about the spacecraft center of mass is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{SRP}
 =
 \sum_i
 \mathbf c_{i,B}
 \times
 \mathbf F_{SRP,i,B}
-\]
+\end{equation}
 
 The translational SRP acceleration is
-\[
+\begin{equation}
 \mathbf a_{SRP}
 =
 \frac{1}{m}
 \sum_i
 \mathbf F_{SRP,i,I}
-\]
+\end{equation}
 
 \subsubsection{Environmental Torque Total and Average}
 
 To calculate/plot the total influence of the environmental torques, the accumulated momentum norms are summed over each small $\Delta t$ timestep across the simulation for each environment model \(j\in\{GG,D,SRP\}\).
-\[
+\begin{equation}
 \Delta \mathbf h_{j,day}
 \approx
 \sum_k
 \boldsymbol{\tau}_j(t_k)\Delta t,
-\]
+\end{equation}
 
 With the average being
 
-\[
+\begin{equation}
 \bar{\boldsymbol{\tau}}_{j,orb}
 \approx
 \frac{1}{N}
 \sum_{k=0}^{N-1}
-||\boldsymbol{\tau}_j||(t_k)
-\]
+\|\boldsymbol{\tau}_j(t_k)\|
+\end{equation}
 
 With a perfectly symmetrical spacecraft around the z-axis, over the course of a day, the environmental torques oscillate, with all being under $1*10^{-5}$ (N\,m\,s). If the simulation were to run indefinitely, the average torques look to approach zero.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 4/simulation_environmental_torque_short.png}}
-  \caption{Cumulative environmental torque over approximately one orbit.}
+  \caption{Induced change in angular momentum over approximately one orbit.}
   \label{fig:hw4-env-torque-short}
 \end{figure}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 4/simulation_environmental_torque_long_ideal.png}}
-  \caption{Cumulative environmental torque history over a full day.}
+  \caption{Induced change in angular momentum over approximately a full day.}
   \label{fig:hw4-env-torque-full}
 \end{figure}
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\detokenize{ARGUS Satellite Images/Homework 4/simulation_environmental_torque.png}}
-  \caption{Cumulative environmental torque history with perturbed inertia.}
+  \caption{Induced change in angular momentum over one day with perturbed inertia.}
   \label{fig:hw4-env-torque-mass-perturbed}
 \end{figure}
 
@@ -2145,7 +2168,7 @@ After adding mass perturbation to the spacecraft, the results show substantially
 
 From this simulation, the impulse is:
 
-\[
+\begin{equation}
 \Delta \mathbf{h}
 =
 \begin{bmatrix}
@@ -2154,17 +2177,17 @@ From this simulation, the impulse is:
 3.611328\times 10^{-6}
 \end{bmatrix}
 \ \mathrm{N\,m\,s}
-\]
+\end{equation}
 
 Using the principal inertia tensor calculated in Section~\ref{subsec:moment-of-inertia},
 
-\[
+\begin{equation}
 \Delta \boldsymbol{\omega}
 =
 J^{-1}\Delta \mathbf{h}
-\]
+\end{equation}
 
-\[
+\begin{equation}
 \Delta \boldsymbol{\omega}
 =
 \begin{bmatrix}
@@ -2179,24 +2202,25 @@ J^{-1}\Delta \mathbf{h}
 1.0004\times10^{-4}
 \end{bmatrix}
 \ \mathrm{rad/s}
-\]
+\end{equation}
 
-\[
+\begin{equation}
 \left\|\Delta \boldsymbol{\omega}\right\|_2
 =
 2.1831\times10^{-2}\ \mathrm{rad/s}
-\]
+\end{equation}
 
 In the ideal case ARGUS could point the camera and center a landmark with a $0.007$ rad/s slew rate as calculated earlier. The environmental torque accumulated in just one day would be three times greater than this tolerance. In order to keep the induced rotation at the same order of magnitude of this slew rate, ARGUS would have to dump this momentum at least three times per day, or roughly every five orbits (disregarding the saturation of the reaction wheels).
 
+\clearpage
 \section{Attitude Regulation Controller}
 
 The simulation uses the TVLQR implementation discussed in class for both the regulation and the Eigen-Slew tracking.
-
+\subsection{Regulator Algorithm}
 \subsubsection{Regulation Error State}
 
 The controller uses the state
-\[
+\begin{equation}
 \Delta \mathbf x
 =
 \begin{bmatrix}
@@ -2205,7 +2229,7 @@ The controller uses the state
 \Delta\mathbf r_w
 \end{bmatrix}
 \in\mathbb R^9,
-\]
+\end{equation}
 where \(\boldsymbol{\phi}\) is the local attitude-error parameter,
 \(\Delta\boldsymbol{\omega}\) is the angular-velocity error, and
 \(\Delta\mathbf r_w\) is the wheel-momentum error.
@@ -2213,15 +2237,15 @@ where \(\boldsymbol{\phi}\) is the local attitude-error parameter,
 \subsubsection{Gyrostat Linearization}
 
 The continuous-time linearized system dynamics are
-\[
+\begin{equation}
 \Delta\dot{\mathbf x}
 =
 A_c\Delta\mathbf x
 +
 B_c\mathbf u,
-\]
+\end{equation}
 with
-\[
+\begin{equation}
 A_c
 =
 \begin{bmatrix}
@@ -2244,9 +2268,9 @@ J^{-1}
 &
 0
 \end{bmatrix},
-\]
+\end{equation}
 and
-\[
+\begin{equation}
 B_c
 =
 \begin{bmatrix}
@@ -2254,21 +2278,21 @@ B_c
 -J^{-1}B_w\\
 I
 \end{bmatrix}
-\]
+\end{equation}
 
 \subsubsection{Zero-Order-Hold Discretization}
 
 The continuous-time linear system is discretized using a zero-order hold:
-\[
+\begin{equation}
 \Delta \mathbf x_{k+1}
 =
 A_k\Delta \mathbf x_k
 +
 B_k\mathbf u_k
-\]
+\end{equation}
 
 The discrete matrices are obtained from the matrix exponential discussed in class
-\[
+\begin{equation}
 \exp
 \left(
 \begin{bmatrix}
@@ -2282,12 +2306,12 @@ A_c & B_c\\
 A_k & B_k\\
 0 & I
 \end{bmatrix}
-\]
+\end{equation}
 
 \subsubsection{LQR Cost and Feedback Law}
 
 The discrete-time quadratic cost is
-\[
+\begin{equation}
 J_{LQR}
 =
 \sum_{k=0}^{N-1}
@@ -2298,45 +2322,45 @@ J_{LQR}
 \right)
 +
 \Delta\mathbf x_N^TP_N\Delta\mathbf x_N
-\]
+\end{equation}
 
 The feedback law is
-\[
+\begin{equation}
 \mathbf u_k
 =
 \bar{\mathbf{u}}_k
 -
 K_k\Delta\mathbf x_k
-\]
+\end{equation}
 
 For the attitude regulation, the angular velocity and wheel momentum derivative should be zero,
-\[
+\begin{equation}
 q=q_d,
 \qquad
 \boldsymbol{\omega}=0,
 \qquad
 \mathbf{r} = \mathbf{u} =0.
-\]
+\end{equation}
 
 The commanded reaction-wheel torque applied to the spacecraft is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{RW,k}
 =
 -B_w\mathbf u_k
-\]
+\end{equation}
 
 Solving the Riccati equation gives the feedback gain as
-\[
+\begin{equation}
 K_k
 =
 \left(
 R+B_k^TP_{k+1}B_k
 \right)^{-1}
 B_k^TP_{k+1}A_k
-\]
+\end{equation}
 
 And 
-\[
+\begin{equation}
 P_k
 =
 Q
@@ -2344,7 +2368,7 @@ Q
 A_k^TP_{k+1}A_k
 -
 A_k^TP_{k+1}B_kK_k
-\]
+\end{equation}
 
 For the steady nominal gain, recursion is iterated until the gain
 converges to a fixed value \(K_{ss}\). 
@@ -2358,13 +2382,13 @@ Solving for K with $10000$ steps ($1000$ seconds) with a control frequency of $1
   \label{fig:tvlqr-gain-convergence}
 \end{figure}
 
-\subsubsection{Regulator Performance}
+\subsection{Regulator Performance}
 
 Controller performance even up to $90^{\circ}$ performed well. With a five-orbit simulation, the regulator had an RMS tracking error of $0.8385^{\circ}$ (discarding the transient slewing period).
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.8\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/LQR 90 Deg/simulation_target_attitude_90.png}
+  \includegraphics[width=0.7\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/LQR 90 Deg/simulation_target_attitude_90.png}
   \caption{Five orbit target attitude tracking for a $90^{\circ}$ slew (Regulator LQR).}
   \label{fig:lqr_90_tracking}
 \end{figure}
@@ -2392,105 +2416,107 @@ Controller performance even up to $90^{\circ}$ performed well. With a five-orbit
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.49\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/simulation_gyro_mag_torques_RM1.png}\hfill
-  \includegraphics[width=0.49\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/simulation_gyro_mag_torques_RM25.png}
-  \caption{Actuator command saturation comparison for the regulator: ASTROFEIN RM1 (left) versus ASTROFEIN RM25 (right).}
+  \captionsetup{justification=centering}
+  \includegraphics[width=0.8\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/simulation_gyro_mag_torques_RM1.png}\\[0.5em]
+  \includegraphics[width=0.8\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/simulation_gyro_mag_torques_RM25.png}
+  \caption{Actuator command saturation comparison for the regulator: ASTROFEIN RM1 (top) versus ASTROFEIN RM25 (bottom).}
   \label{fig:lqr_rm1_vs_rm25}
 \end{figure}
 
+\clearpage
 \section{TVLQR Eigen-Axis Slew}
 
 \subsubsection{Regulator versus Eigen-Axis Slew}
 
 For fixed-target regulation, the controller commands the final attitude directly
-\[
+\begin{equation}
 \bar{q}=q_d,
 \qquad
 \bar{\boldsymbol{\omega}}=0,
 \qquad
 \bar{\mathbf u}=0
-\]
+\end{equation}
 
 For eigen-axis slew tracking, the controller tracks a time-varying reference
-\[
+\begin{equation}
 \bar{q}=\bar{q}(t),
 \qquad
 \bar{\boldsymbol{\omega}}=\bar{\boldsymbol{\omega}}(t),
 \qquad
 \bar{\mathbf u}=\bar{\mathbf u}(t)
-\]
+\end{equation}
 
 Thus, the regulator feedback law is
-\[
+\begin{equation}
 \mathbf u_k
 =
 -
 K\Delta\mathbf x_k,
-\]
+\end{equation}
 while the eigen-axis slew feedback law is
-\[
+\begin{equation}
 \mathbf u_k
 =
 \bar{\mathbf u}_k
 -
 K_k\Delta\mathbf x_k
-\]
+\end{equation}
 
 The regulator relies entirely on feedback to remove large attitude errors, while
 the eigen-axis slew uses a feedforward trajectory generated from inverse
 dynamics and only uses feedback to reject disturbances and tracking error.
 
 
-\subsubsection{Computing the Eigne Slew Axis}
+\subsubsection{Computing the Eigen Slew Axis}
 
 The initial attitude is specified as a rotation matrix \(Q_0\) and \(Q_d\) is the desired
 final attitude rotation matrix. The relative rotation from the initial attitude
 to the desired attitude is
-\[
+\begin{equation}
 {}^DQ^B
 =
 Q_D^T Q_0
-\]
+\end{equation}
 
 The eigen-slew rotation axis is the eigenvector of ${}^DQ^B\mathbf e$
 corresponding to the eigenvalue \(\lambda=1\)
 
-\[
+\begin{equation}
 {}^DQ^B\nu
 =
 \nu
-\]
+\end{equation}
 
 \subsubsection{Computing the Eigen-Slew Angle (Versine Slew Profile)}
 
 For an eigen slew that has a duration \(T\), and a final rotation angle $\theta_f$, the trajectory takes the form
-\[
+\begin{equation}
 \theta(t)=\frac{\theta_f}{2}\left(1-\cos(\alpha t)\right),\qquad \alpha=\frac{\pi}{T}, \qquad 0\leq t\leq T
-\]
+\end{equation}
 
 The angular-rate is
-\[
+\begin{equation}
 \dot{\theta}(t)
 =
 \frac{\theta_f}{2}
 \alpha
 \sin(\alpha t)
-\]
+\end{equation}
 
 And the angular-acceleration is
-\[
+\begin{equation}
 \ddot{\theta}(t)
 =
 \frac{\theta_f}{2}
 \alpha^2
 \cos(\alpha t)
-\]
+\end{equation}
 
 \subsubsection{Inverse Dynamics for Wheel Momentum}
 
 Along the nominal slew, the torque-free gyrostat equation with internal wheel
 momentum is
-\[
+\begin{equation}
 J\dot{\bar{\boldsymbol{\omega}}}
 +
 \dot{\bar{\boldsymbol{\rho}}}
@@ -2501,10 +2527,10 @@ J\bar{\boldsymbol{\omega}}+
 \bar{\boldsymbol{\rho}}\right)
 =
 0.
-\]
+\end{equation}
 
 Solving for the required wheel-momentum derivative gives
-\[
+\begin{equation}
 \dot{\bar{\boldsymbol{\rho}}}
 =
 -
@@ -2514,58 +2540,58 @@ J\dot{\bar{\boldsymbol{\omega}}}
 \left(
 J\bar{\boldsymbol{\omega}}+
 \bar{\boldsymbol{\rho}}\right)
-\]
+\end{equation}
 
 The reaction wheel momentum is solved by integrating $\dot{\rho}$
-\[
+\begin{equation}
 \bar{\boldsymbol{\rho}}(t)
 =
 \bar{\boldsymbol{\rho}}(0)
 +
 \int_0^t
 \dot{\bar{\boldsymbol{\rho}}}(\tau)\,d\tau
-\]
+\end{equation}
 
 Lastly, the reaction wheel momentum-rate command is
-\[
+\begin{equation}
 \bar{\mathbf u}
 =
 \dot{\bar{\mathbf r}}_{w}
 =
 B_w^{-1}
 \dot{\bar{\boldsymbol{\rho}}}
-\]
+\end{equation}
 
 \subsubsection{Closed-Loop Eigen-Slew Tracking}
 
 The tracking error state is
-\[
+\begin{equation}
 \Delta\mathbf x_k
 =
 \begin{bmatrix}
 \left(
-\phi(L(\bar{q}_k^T q_k
+\phi(L(\bar{q}_k)^T q_k
 \right)\\
 \boldsymbol{\omega}_k-\bar{\boldsymbol{\omega}}_k\\
 \mathbf r_{w,k}-\bar{\mathbf r}_{w,k}
 \end{bmatrix}
-\]
+\end{equation}
 
 The time-varying LQR feedback law is
-\[
+\begin{equation}
 \mathbf u_k
 =
 \bar{\mathbf u}_k
 -
 K_k\Delta\mathbf x_k
-\]
+\end{equation}
 
 The commanded spacecraft body torque is
-\[
+\begin{equation}
 \boldsymbol{\tau}_{RW,k}
 =
 -B_w\mathbf u_k
-\]
+\end{equation}
 
 \subsubsection{Regulator vs TVLQR Comparison}
 
@@ -2596,14 +2622,14 @@ Surprisingly, the regulator LQR was able to command a full $180^{\circ}$ slew wi
 \end{figure}
 \FloatBarrier
 
-Upon multiple tests, the LQR and TVLQR both performed well. The greatest advantage of the TVLQR is that is minimized saturation of the small RM1 reaction wheels. In some cases, this prevented strong oscillatory behavior as the LQR would attempt to reach the target.
+Upon multiple tests, the LQR and TVLQR both performed well. The greatest advantage of the TVLQR is that it minimized saturation of the small RM1 reaction wheels. In some cases, this prevented strong oscillatory behavior as the LQR attempted to reach the target.
 
 \FloatBarrier
 \begin{figure}[!htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/simulation_target_attitude_sloshing.png}\\[0.5em]
   \includegraphics[width=0.95\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/simulation_gyro_mag_torques_sloshing.png}
-  \caption{Regulator with showing high tracking oscillation and actuator saturation (RM1).}
+  \caption{Regulator showing high tracking oscillation and actuator saturation (RM1).}
   \label{fig:lqr_sloshing}
 \end{figure}
 
@@ -2616,15 +2642,400 @@ Upon multiple tests, the LQR and TVLQR both performed well. The greatest advanta
 \end{figure}
 \FloatBarrier
 
-During a 100-trial monte-carlo simulation with a 500-seconds eigen-slew using the RM1 reaction wheels, all but a handful of trials had successfully converged toward the desired attitude (identity quaternion) by the $3000$ second mark.
+During a 100-trial monte-carlo simulation with a 500-second eigen-slew using the RM1 reaction wheels, all but a handful of trials had successfully converged toward the desired attitude (identity quaternion) by the $3000$ second mark. Similarly, the regulator converged for most of its 100 trials, so much so that both monte-carlo simulations look nearly identical.
 
 \FloatBarrier
+
+\begin{figure}[H]
+  \centering
+  \captionsetup{justification=centering}
+  \includegraphics[width=0.9\linewidth]{ARGUS Satellite Images/Homework 4/Regular_LQR/monte_carlo_components.png}
+  \caption{100 Trial non-tracking Regulator LQR monte-carlo with randomized attitude and small perturbations.}
+  \label{fig:lqr_montecarlo}
+\end{figure}
+
 \begin{figure}[!htbp]
   \centering
-  \includegraphics[width=0.95\linewidth]{ARGUS Satellite Images/Homework 4/monte_carlo_components.png}
+  \includegraphics[width=0.9\linewidth]{ARGUS Satellite Images/Homework 4/TVLQR/monte_carlo_components.png}
   \caption{100 Trial TVLQR monte-carlo with randomized attitude and small perturbations.}
   \label{fig:montecarlo}
 \end{figure}
+
+\clearpage
+\section{Final Project: Magnetorquer Only Pointing Control}
+
+Control with magnetorquers only is inherently difficult due to the nature of how the torque is produced. Magnetorquers command a magnetic dipole moment and, as a result, the torque is constrained to the plane perpendicular to the direction of the magnetic field.
+
+\subsection{Lyapunov Momentum Pointing Algorithm}
+A method proposed by Fisch et al.~\cite{fisch2026advancing} is to align the angular momentum of the spacecraft with a desired axis using a Lyapunov-based switching controller. First, the spacecraft spins up to a desired angular velocity and aligns its angular momentum vector with the desired rotation axis. Then, once the spacecraft's tracking error is within the tolerance, it aligns its momentum vector with a time-dependent inertial reference vector.
+
+\par\medskip
+
+The variables used in Algorithm~\ref{alg:lyapunov_spin_axis_pointing}
+are defined as follows:
+\[
+\begin{array}{ll}
+\mathbf{s}(t) \in \mathbb{S}^{2}
+&
+\text{Target pointing direction expressed in the body frame.}
+\\[0.4em]
+
+\mathbf{b} \in \mathbb{R}^{3}
+&
+\text{Local geomagnetic field vector expressed in the body frame.}
+\\[0.4em]
+
+\hat{\mathbf b} \in \mathbb{R}^{3 \times 3}
+&
+\text{Skew-symmetric cross-product matrix that satisfies }
+\hat{\mathbf b}\mathbf{x} = \mathbf{b} \times \mathbf{x}.
+\\[0.4em]
+
+\boldsymbol{\omega} \in \mathbb{R}^{3}
+&
+\text{Body-frame angular velocity of the spacecraft.}
+\\[0.4em]
+
+J \in \mathbb{R}^{3 \times 3}
+&
+\text{Spacecraft inertia tensor expressed in the body frame.}
+\\[0.4em]
+
+\mathbf{h} = J\boldsymbol{\omega}
+&
+\text{Current angular momentum expressed in the body frame.}
+\\[0.4em]
+
+\mathbf{h}_{\mathrm{tgt}} \in \mathbb{R}^{3}
+&
+\text{Target angular momentum expressed in the body frame.}
+\\[0.4em]
+
+\mathbf{a}
+=
+\dfrac{\mathbf{h}_{\mathrm{tgt}}}
+{\|\mathbf{h}_{\mathrm{tgt}}\|}
+&
+\text{Desired spin-stabilized axis in the body frame.}
+\\[1.0em]
+
+\mathrm{tol}_{SS} \in \mathbb{R}_{+}
+&
+\text{Spin-stabilization switching tolerance.}
+\\[0.4em]
+
+\mathrm{tol}_{P} \in \mathbb{R}_{+}
+&
+\text{Pointing-mode switching tolerance.}
+\\[0.4em]
+
+u_{\max} \in \mathbb{R}_{+}
+&
+\text{Maximum commanded magnetic dipole magnitude.}
+\\[0.4em]
+
+\boldsymbol{u} \in \mathbb{R}^{3}
+&
+\text{Commanded magnetic dipole moment in the body frame.}
+\\[0.4em]
+
+\alpha(\|\mathbf{x}\|) = \tanh\big(k\|\mathbf{x}\|\big) \in [0,1),\; k \in \mathbb{R}_{+}
+&
+\text{Smoothing function that maps a nonnegative command magnitude to [0,1).}
+\end{array}
+\]
+
+\begin{algorithm}[H]
+\caption{Fisch et al. Lyapunov-Based Spin-Axis Pointing Controller}
+\label{alg:lyapunov_spin_axis_pointing}
+
+\KwIn{$\mathbf{s}(t),\ \mathbf{b},\ \boldsymbol{\omega},\ \mathbf{h}_{\mathrm{tgt}}$}
+\KwOut{$\boldsymbol{u}$}
+
+$\mathbf{h} \leftarrow J\boldsymbol{\omega}$\;
+$\mathbf{a} \leftarrow \mathbf{h}_{\mathrm{tgt}}/\|\mathbf{h}_{\mathrm{tgt}}\|$\;
+
+\If{$\left\|\mathbf{a} - \dfrac{\mathbf{h}}{\|\mathbf{h}_{\mathrm{tgt}}\|}\right\| > \mathrm{tol}_{SS}$}{
+  $\boldsymbol{u}'_{b} \leftarrow \hat{\mathbf{b}}\,\big(\mathbf{a}\,\|\mathbf{h}_{\mathrm{tgt}}\| - \mathbf{h}\big)$\;
+  $\boldsymbol{u} \leftarrow u_{\max}\alpha(\|\boldsymbol{u}'_{b}\|)\,\dfrac{\boldsymbol{u}'_{b}}{\|\boldsymbol{u}'_{b}\|}$\;
+}
+\ElseIf{$\left\|\mathbf{s}(t) - \dfrac{\mathbf{h}}{\|\mathbf{h}_{\mathrm{tgt}}\|}\right\| > \mathrm{tol}_{P}$}{
+  $\boldsymbol{u}'_{i} \leftarrow \hat{\mathbf{b}}\,\big(\mathbf{s}(t)\,\|\mathbf{h}_{\mathrm{tgt}}\| - \mathbf{h}\big)$\;
+  $\boldsymbol{u} \leftarrow u_{\max}\alpha(\|\boldsymbol{u}'_{i}\|)\,\dfrac{\boldsymbol{u}'_{i}}{\|\boldsymbol{u}'_{i}\|}$\;
+}
+\Else{
+  $\boldsymbol{u} \leftarrow \mathbf{0}_{3\times 1}$\;
+}
+
+\Return{$\boldsymbol{u}$}\;
+\label{alg:lyapunov_spin_axis_pointing}
+\end{algorithm}
+
+\noindent\textbf{Per-coil allocation (pseudo-inverse):} The command output from Algorithm~\ref{alg:lyapunov_spin_axis_pointing} is a $3 \times 1$ vector dipole moment. Given the commanded dipole moment $\boldsymbol{u}$ and the body-frame magnetorquer orientation (allocation) matrix $G_{\mathrm{MTB},b}$, the per-actuator command is computed using the Moore--Penrose pseudoinverse as described in the lecture notes.\footnote{In the simulator, the output command is scaled by the max voltage, which is then used to compute the dipole moment given the rest of the physical properties of the magnetorquers found in Table \ref{tab:argus-magnetorquers}.}
+\begin{equation}
+\mathbf{u}_{\mathrm{coil\;voltage}} = G_{\mathrm{MTB},b}^T(G_{\mathrm{MTB},b}G_{\mathrm{MTB},b}^T)^{-1}\,\boldsymbol{\mathbf{u}}_{\mathrm{cmd\;voltage}}
+\end{equation}
+
+\subsection{Results}
+
+\begin{quote}
+\textbf{Note:} After running several simulations, I realized that the Sun-pointing ECI direction $[1, 0, 0]$ specified earlier in the report does not match the Sun-pointing direction used to generate the Sun-sensor measurements (computed using SPICE; see Section~\ref{sec:sun-model}). I have corrected this in the simulator, but the plots in this report do not reflect this change.
+\end{quote}
+
+\subsubsection{Slow Target Angular Velocity ($\sim10$ deg/s) with Default Magnetorquers}
+ARGUS's six magnetorquers are very weak relative to the torque produced by the reaction wheels. In order to spin stabilize with a desired angular velocity of $\sim 10^{\circ}$deg/s around the z+ axis (solar-panel/safe-mode axis) and point towards the time-dependent Sun-pointing axis, it takes around $22,000$ seconds, or roughly four orbits\footnote{The spin-stabilizing tolerance and pointing tolerance were set to $0.4$ and $0.2$ respectively.}. After this, the spacecraft reaches an oscillatory steady state, hovering around $20^{\circ}$ to $40^{\circ}$ of pointing error relative to the target axis. 
+
+\begin{figure}[!htb]
+  \centering
+  \includegraphics[width=\textwidth,height=0.82\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_plot.png}}
+  \caption{Slow target angular velocity: full simulation.}
+  \label{fig:hw5-weak-sim-plot-slow}
+\end{figure}
+\FloatBarrier
+
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_magnetorquer_target_axes.png}}
+    \caption{Slow target angular velocity: target axes and pointing.}
+    \label{fig:hw5-weak-target-axes-slow}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_sun_safe_mode_axis.png}}
+    \caption{Slow target angular velocity: pointing error.}
+    \label{fig:hw5-weak-sun-safe-mode-axis-slow}
+  \end{subfigure}
+
+  \caption{Slow target angular velocity: pointing behavior.}
+  \label{fig:hw5-weak-torquers-results-1-slow}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/momentum_sphere.png}}
+    \caption{Slow target angular velocity: momentum sphere.}
+    \label{fig:hw5-weak-momentum-sphere-slow}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_gyro_mag_torques.png}}
+    \caption{Slow target angular velocity: commanded torques.}
+    \label{fig:hw5-weak-gyro-mag-torques-slow}
+  \end{subfigure}
+
+  \caption{Slow target angular velocity: control effort.}
+  \label{fig:hw5-weak-torquers-results-2-slow}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_sensors.png}}
+    \caption{Slow target angular velocity: sensors.}
+    \label{fig:hw5-weak-sensors-slow}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_camera_measurements.png}}
+    \caption{Slow target angular velocity: camera.}
+    \label{fig:hw5-weak-camera-slow}
+  \end{subfigure}
+
+  \caption{Slow target angular velocity: measurements.}
+  \label{fig:hw5-weak-torquers-results-4-slow}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_estimator.png}}
+    \caption{Slow target angular velocity: MEKF performance.}
+    \label{fig:hw5-weak-estimator-slow}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/slow/simulation_environmental_torque.png}}
+    \caption{Slow target angular velocity: disturbance torques.}
+    \label{fig:hw5-weak-env-torque-slow}
+  \end{subfigure}
+
+  \caption{Slow target angular velocity: estimation and disturbances.}
+  \label{fig:hw5-weak-torquers-results-3-slow}
+\end{figure}
+\FloatBarrier
+
+\subsubsection{Fast Target Angular Velocity ($\sim 45$ deg/s) with Default Magnetorquers}
+However, once the angular velocity target was set to $\sim 45$ deg/s, the target error falls within the tolerance threshold around $50{,}000$ seconds, or nine orbits. I suspect that the higher angular momentum reduces sensitivity to disturbances (noting that in all simulations, the initial state had completely identical settings excluding slightly different initial rotation rates) and thus increases performance. The caveat is that it takes significantly longer to reach the target with greater rotational momentum.
+
+\enlargethispage{2\baselineskip}
+\begin{figure}[!htb]
+  \centering
+  \includegraphics[width=\textwidth,height=0.88\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_plot.png}}
+  \caption{Fast target angular velocity: full simulation.}
+  \label{fig:hw5-weak-sim-plot}
+\end{figure}
+
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_magnetorquer_target_axes.png}}
+    \caption{Fast target angular velocity: target axes and pointing.}
+    \label{fig:hw5-weak-target-axes}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_sun_safe_mode_axis.png}}
+    \caption{Fast target angular velocity: pointing error.}
+    \label{fig:hw5-weak-sun-safe-mode-axis}
+  \end{subfigure}
+
+  \caption{Fast target angular velocity: pointing behavior.}
+  \label{fig:hw5-weak-torquers-results-1}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/momentum_sphere.png}}
+    \caption{Fast target angular velocity: momentum sphere.}
+    \label{fig:hw5-weak-momentum-sphere}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_gyro_mag_torques.png}}
+    \caption{Fast target angular velocity: commanded torques.}
+    \label{fig:hw5-weak-gyro-mag-torques}
+  \end{subfigure}
+
+  \caption{Fast target angular velocity: control effort.}
+  \label{fig:hw5-weak-torquers-results-2}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_sensors.png}}
+    \caption{Fast target angular velocity: sensors.}
+    \label{fig:hw5-weak-sensors}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_camera_measurements.png}}
+    \caption{Fast target angular velocity: camera.}
+    \label{fig:hw5-weak-camera}
+  \end{subfigure}
+
+  \caption{Fast target angular velocity: measurements.}
+  \label{fig:hw5-weak-torquers-results-4}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_estimator.png}}
+    \caption{Fast target angular velocity: MEKF performance.}
+    \label{fig:hw5-weak-estimator}
+  \end{subfigure}
+
+  \vspace{0.8em}
+
+  \begin{subfigure}[t]{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Weak Torquers/fast/simulation_environmental_torque.png}}
+    \caption{Fast target angular velocity: disturbance torques.}
+    \label{fig:hw5-weak-env-torque}
+  \end{subfigure}
+
+  \caption{Fast target angular velocity: estimation and disturbances.}
+  \label{fig:hw5-weak-torquers-results-3}
+\end{figure}
+\FloatBarrier
+
+\subsubsection{Slow Target Angular Velocity with $10 \times$ Magnetorquer Strength}
+With significantly stronger magnetorquers, the same controller converges to the desired angular momentum state much faster. Even so, the stronger magnetorquers are unable to slew the spacecraft towards the Sun-pointing direction at nearly the same rate as it was able to converge towards the spin-stabilizing tolerance. As the spacecraft moves along its orbit, the geomagnetic field direction changes, which allows the controller to accumulate control authority in directions that were previously unavailable. Thus, convergence in the Sun-pointing axis is limited by the time-varying geometry of the geomagnetic field, even if the actuators are relatively strong.
+
+\enlargethispage{2\baselineskip}
+\begin{figure}[!htb]
+  \centering
+  \includegraphics[width=\textwidth,height=0.88\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Strong Torquers/simulation_plot.png}}
+  \caption{Strong magnetorquers: full simulation.}
+  \label{fig:hw5-strong-sim-plot}
+\end{figure}
+
+\clearpage
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth,height=0.88\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Strong Torquers/simulation_sun_safe_mode_axis.png}}
+  \caption{Strong magnetorquers: pointing error.}
+  \label{fig:hw5-strong-sun-safe-mode-axis}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth,height=0.88\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Strong Torquers/simulation_gyro_mag_torques.png}}
+  \caption{Strong magnetorquers: commanded torques.}
+  \label{fig:hw5-strong-gyro-mag-torques}
+\end{figure}
+\clearpage
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth,height=0.88\textheight,keepaspectratio]{\detokenize{ARGUS Satellite Images/Homework 5/Strong Torquers/momentum_sphere.png}}
+  \caption{Strong magnetorquers: momentum sphere.}
+  \label{fig:hw5-strong-momentum-sphere}
+\end{figure}
+
+
 
 \clearpage
 % --- References ---
