@@ -636,6 +636,7 @@ def magnetorquer_target_axis_values(
     target_spin_axis_body: np.ndarray,
     target_pointing_axis_inertial: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    attitudes = np.asarray(attitudes, dtype=float)
     spin_axis_body = _unit_rows_or_nan(angular_rates_body)
 
     target_spin_axis_body = np.asarray(target_spin_axis_body, dtype=float).reshape(3)
@@ -645,14 +646,25 @@ def magnetorquer_target_axis_values(
 
     target_pointing_axis_inertial = np.asarray(
         target_pointing_axis_inertial, dtype=float
-    ).reshape(3)
-    target_pointing_axis_inertial = target_pointing_axis_inertial / np.linalg.norm(
-        target_pointing_axis_inertial
     )
+    if target_pointing_axis_inertial.ndim == 1:
+        target_pointing_axis_inertial = target_pointing_axis_inertial.reshape(3)
+        target_pointing_axis_inertial = target_pointing_axis_inertial / np.linalg.norm(
+            target_pointing_axis_inertial
+        )
+        target_pointing_axis_history = np.tile(
+            target_pointing_axis_inertial, (attitudes.shape[0], 1)
+        )
+    elif target_pointing_axis_inertial.shape == (attitudes.shape[0], 3):
+        target_pointing_axis_history = _unit_rows_or_nan(target_pointing_axis_inertial)
+    else:
+        raise ValueError(
+            "target_pointing_axis_inertial must be shape (3,) or (n_times, 3)"
+        )
     target_pointing_axis_body = np.asarray(
         [
-            inertial_to_body(q / np.linalg.norm(q), target_pointing_axis_inertial)
-            for q in np.asarray(attitudes, dtype=float)
+            inertial_to_body(q / np.linalg.norm(q), target_axis)
+            for q, target_axis in zip(attitudes, target_pointing_axis_history)
         ],
         dtype=float,
     )
@@ -1779,9 +1791,16 @@ def plot_simulation(
     magnetorquer_target_axes_fig = None
     controller = getattr(ctx, "controller", None)
     target_spin_axis_body = getattr(controller, "target_spin_stable_axis_body", None)
-    target_pointing_axis_inertial = getattr(
-        controller, "target_pointing_axis_inertial", None
-    )
+    if hasattr(controller, "target_pointing_axis_inertial_history"):
+        target_pointing_axis_inertial = (
+            controller.target_pointing_axis_inertial_history(
+                history[:, ctx.idx["POS_ECI"]], times
+            )
+        )
+    else:
+        target_pointing_axis_inertial = getattr(
+            controller, "target_pointing_axis_inertial", None
+        )
     if target_spin_axis_body is not None and target_pointing_axis_inertial is not None:
         if getattr(ctx, "show_magnetorquer_target_axes_plot", True):
             magnetorquer_target_axes_fig = plot_magnetorquer_target_axes_figure(

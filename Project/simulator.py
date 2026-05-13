@@ -702,18 +702,58 @@ class Simulator:
                 ),
                 "controller_properties.magnetorquer_only.target_spin_stable_axis_body",
             )
-            target_pointing_axis_inertial = self._unit_vector(
+            target_pointing_axis_raw = self._section_value(
+                magnetorquer_cfg,
+                "target_pointing_axis_inertial",
                 self._section_value(
                     magnetorquer_cfg,
-                    "target_pointing_axis_inertial",
-                    self._section_value(
-                        magnetorquer_cfg,
-                        "target_pointing_axis",
-                        self.spacecraft.sun_direction_eci,
-                    ),
+                    "target_pointing_axis",
+                    self.spacecraft.sun_direction_eci,
                 ),
+            )
+            target_pointing_axis_source = self._section_value(
+                magnetorquer_cfg,
+                "target_pointing_axis_source",
+                (
+                    target_pointing_axis_raw
+                    if isinstance(target_pointing_axis_raw, str)
+                    else "fixed"
+                ),
+            )
+            target_pointing_axis_source = (
+                str(target_pointing_axis_source).strip().lower()
+            )
+            if target_pointing_axis_source in {"spice_sun", "spice", "sun"}:
+                target_pointing_axis_source = "spice_sun"
+            elif target_pointing_axis_source in {"fixed", "constant", "config"}:
+                target_pointing_axis_source = "fixed"
+            else:
+                raise ValueError(
+                    "controller_properties.magnetorquer_only.target_pointing_axis_source "
+                    "must be 'fixed' or 'spice_sun'"
+                )
+            if isinstance(target_pointing_axis_raw, str):
+                if target_pointing_axis_source != "spice_sun":
+                    raise ValueError(
+                        "controller_properties.magnetorquer_only.target_pointing_axis_inertial "
+                        "must be a vector unless target_pointing_axis_source is 'spice_sun'"
+                    )
+                target_pointing_axis_raw = self.spacecraft.sun_direction_eci
+            target_pointing_axis_inertial = self._unit_vector(
+                target_pointing_axis_raw,
                 "controller_properties.magnetorquer_only.target_pointing_axis_inertial",
             )
+            target_sun_model = None
+            if target_pointing_axis_source == "spice_sun":
+                if self.environment_model is not None:
+                    target_sun_model = self.environment_model.get("sun_model")
+                if target_sun_model is None:
+                    environment_cfg = self.cfg.get("environment_properties", {}) or {}
+                    target_sun_model = SunModel(
+                        kernel_paths=self._section_value(
+                            environment_cfg, "kernel_paths", []
+                        )
+                    )
             target_rate_body = self._section_value(
                 magnetorquer_cfg,
                 "target_rate_body",
@@ -742,6 +782,8 @@ class Simulator:
                 "target_rate_body": target_rate_body,
                 "target_spin_stable_axis_body": target_spin_stable_axis_body,
                 "target_pointing_axis_inertial": target_pointing_axis_inertial,
+                "target_pointing_axis_source": target_pointing_axis_source,
+                "sun_model": target_sun_model,
                 "update_period_s": update_period_s,
                 "spin_stable_tolerance_rad": spin_stable_tolerance_rad,
                 "pointing_tolerance_rad": pointing_tolerance_rad,

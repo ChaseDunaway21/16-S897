@@ -467,6 +467,8 @@ class MagnetorquerOnlyController:
         target_rate_body: np.ndarray | None = None,
         target_spin_stable_axis_body: np.ndarray | None = None,
         target_pointing_axis_inertial: np.ndarray | None = None,
+        target_pointing_axis_source: str = "fixed",
+        sun_model: object | None = None,
         spin_stable_tolerance_rad: float = 0.1,
         pointing_tolerance_rad: float = 0.1,
         update_period_s: float = 0.0,
@@ -479,6 +481,17 @@ class MagnetorquerOnlyController:
             else target_spin_stable_axis_body,
             "target_spin_stable_axis_body",
         )
+        source = str(target_pointing_axis_source or "fixed").strip().lower()
+        if source in {"fixed", "constant", "config"}:
+            source = "fixed"
+        elif source in {"spice_sun", "spice", "sun"}:
+            source = "spice_sun"
+        else:
+            raise ValueError(
+                "target_pointing_axis_source must be 'fixed' or 'spice_sun'"
+            )
+        self.target_pointing_axis_source = source
+        self.sun_model = sun_model
         self.target_pointing_axis_inertial = unit_vector(
             [1.0, 0.0, 0.0]
             if target_pointing_axis_inertial is None
@@ -514,6 +527,37 @@ class MagnetorquerOnlyController:
         self.pointing_tolerance = angle_to_unit_vector_distance(pointing_tolerance_rad)
         self.max_voltage = float(max_voltage)
         self.momentum_target = self.inertia_tensor @ self.target_rate_body
+
+    def target_pointing_axis_inertial_at(
+        self,
+        position_eci: np.ndarray | None = None,
+        time_s: float = 0.0,
+    ) -> np.ndarray:
+        if self.target_pointing_axis_source != "spice_sun":
+            return self.target_pointing_axis_inertial
+        if self.sun_model is None:
+            raise ValueError(
+                "target_pointing_axis_source='spice_sun' requires a sun_model"
+            )
+        return unit_vector(
+            self.sun_model.direction_eci(position_eci, time_s),
+            "spice_sun_direction_eci",
+        )
+
+    def target_pointing_axis_inertial_history(
+        self, positions_eci: np.ndarray, times_s: np.ndarray
+    ) -> np.ndarray:
+        positions = np.asarray(positions_eci, dtype=float)
+        times = np.asarray(times_s, dtype=float).reshape(-1)
+        if self.target_pointing_axis_source != "spice_sun":
+            return np.tile(self.target_pointing_axis_inertial, (times.size, 1))
+        return np.asarray(
+            [
+                self.target_pointing_axis_inertial_at(position, time_s)
+                for position, time_s in zip(positions, times)
+            ],
+            dtype=float,
+        )
 
     def _alpha_gain(
         self,
@@ -577,7 +621,10 @@ class MagnetorquerOnlyController:
         h_heuristic = h / h_tgt_norm if h_tgt_norm > 1e-12 else np.zeros(3)
 
         a = self.target_spin_stable_axis_body
-        s = inertial_to_body(q, self.target_pointing_axis_inertial)
+        target_pointing_axis_inertial = self.target_pointing_axis_inertial_at(
+            feedback_state[state_index["POS_ECI"]], time_s
+        )
+        s = inertial_to_body(q, target_pointing_axis_inertial)
         s = s / np.linalg.norm(s)
 
         # From [1]

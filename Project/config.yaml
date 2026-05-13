@@ -5,7 +5,7 @@ simulation_properties:
     trials: 25
 
   - name: ideal # this only applies to non-monte carlo simulations, monte carlo will include deviations and perturbations
-    value: False
+    value: True
 
   - name: time_step
     value: 2 # seconds
@@ -249,7 +249,7 @@ actuator_properties:
     cross-sectional_area: 5.432e-3 # m^2
     N_turns:  64 
     resistance: 25 # Ohms
-    max_voltage: 8.4 # V
+    max_voltage: 840 # V
     max_current_rating: 999999 # A, no power limit
     max_power: 999999 # W, no power limit
 
@@ -272,8 +272,9 @@ controller_properties:
   magnetorquer_only:
     target_spin_stable_axis_body: [0.0, 0.0, 1.0] # Body frame, spin around +z
     target_spin_rate: 0.17 # rad/s
-    target_pointing_axis_inertial: [1.0, 0.0, 0.0] # Inertial frame, sun direction
-    spin_stable_tolerance_rad: 0.30 # rad
+    target_pointing_axis_source: spice_sun # Use the SPICE Sun ray in ECI (can use 'spice' 'sun' or spice_sun' for SPICE) or 'fixed' 
+    target_pointing_axis_inertial: [1.0, 0.0, 0.0] # Option when target_pointing_axis_source is 'fixed' or not sun-pointing using SPICE
+    spin_stable_tolerance_rad: 0.40 # rad
     pointing_tolerance_rad: 0.20
 
 sensor_properties:
